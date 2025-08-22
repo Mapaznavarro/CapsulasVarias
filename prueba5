@@ -1,1 +1,2 @@
-{"detalle_comision":[{"sub_detalle":{"codigo_fondo":3077,"folio_inversion":0,"fecha_movimiento":"0","dias_inversion":0,"saldo_monto_inversion":0.0,"monto_rescatado":0.0,"comision_rescate":0.0,"porcentaje_comision":0.0}}],"total_comision":0.0,"total_saldo_inversion":1023098.13,"total_monto_rescate":20.0}
+{"detalle_comision":[{"sub_detalle":{"codigo_fondo":3077,"folio_inversion":0,"fecha_movimiento":"0","dias_inversion":0,"saldo_monto_inversion":0.0,"monto_rescatado":0.0,"comision_rescate":0.0,"porcentaje_comision":0.0}}],"total_comision":0.0,"total_saldo_inversion":1023098.13,"total_monto_rescate":99000000.0}
+
