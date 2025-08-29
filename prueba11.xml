@@ -1,0 +1,16 @@
+&lt;ENTIDADES_FATCA&gt;
+&lt;ENTIDADES_FATCA&gt;
+&lt;codigo&gt;110112&lt;/codigo&gt;
+&lt;entidad&gt;191594&lt;/entidad&gt;
+&lt;fecha_alta&gt;2025-08-30&lt;/fecha_alta&gt;
+&lt;Estatus_Fatca&gt;01&lt;/Estatus_Fatca&gt;
+&lt;folioFicha&gt;900857&lt;/folioFicha&gt;
+&lt;codigoClasificacion&gt;00&lt;/codigoClasificacion&gt;
+&lt;declaracionRemediacion&gt;S&lt;/declaracionRemediacion&gt;
+&lt;IND_DEC_REMEDIACION_IND&gt;S&lt;/IND_DEC_REMEDIACION_IND&gt;
+&lt;/ENTIDADES_FATCA&gt;
+&lt;ENTIDADES_FATCA_AUX&gt;
+&lt;declaracionRemediacion&gt;S&lt;/declaracionRemediacion&gt;
+&lt;IND_DEC_REMEDIACION_IND&gt;S&lt;/IND_DEC_REMEDIACION_IND&gt;
+&lt;/ENTIDADES_FATCA_AUX&gt;
+&lt;/ENTIDADES_FATCA&gt;
