@@ -1,0 +1,131 @@
+<participe>
+	<entidad>
+            <tipo>F</tipo>
+    		<nombre>prueba</nombre>
+    		<apellido1>prueb</apellido1>
+    		<apellido2>prueba</apellido2>
+    		<id_fiscal>24567649</id_fiscal>
+    		<dv>2</dv>
+    		<fecha_alta>09/12/2014</fecha_alta>
+	</entidad>
+	<fisicas>
+    		<fecha_nacimiento>01/01/1981</fecha_nacimiento>
+    		<pais_nacimiento>115</pais_nacimiento>
+    		<pais_nacionalidad>99</pais_nacionalidad>
+    		<sexo>V</sexo>
+    		<estado_civil>S</estado_civil>
+    		<regimen_conyugal></regimen_conyugal>
+    		<nivel_estudios>P</nivel_estudios>
+    		<origen_fondos>V</origen_fondos>
+    		<ingresos_mensual>D</ingresos_mensual>
+    		<ingresos_ocasional>D</ingresos_ocasional>
+    		<patrimonio_financiero>D</patrimonio_financiero>
+    		<patrimonio_no_financiero>D</patrimonio_no_financiero>
+    		<pais_origen_fondos>79</pais_origen_fondos>
+    		<pais_inversion>100</pais_inversion>
+    		<laborables>
+        			<profesion>102</profesion>
+        			<actividad>J</actividad>
+    		</laborables>
+    		<trabajos_estado>
+        			<trabajo_estado codigo="1">
+            			<cargo>B</cargo>
+            			<fecha_servicio>01/01/1980</fecha_servicio>
+            			<institucion>Institucion 1</institucion>
+        		</trabajo_estado>
+        			<trabajo_estado codigo="2">
+            			<cargo>C</cargo>
+            			<fecha_servicio>01/01/1981</fecha_servicio>
+            			<institucion>Institucion 2</institucion>
+        			</trabajo_estado>
+        			<trabajo_estado codigo="3">
+            			<cargo>D</cargo>
+            			<fecha_servicio>01/01/1983</fecha_servicio>
+            			<institucion>Institucion 3</institucion>
+        			</trabajo_estado>
+    		</trabajos_estado>
+    		<parientes_estado>
+        			<pariente_estado codigo="1">
+            			<nombre>Pariente 1</nombre>
+            			<parentesco>C</parentesco>
+            			<cargo>A</cargo>
+            			<institucion>Institucion 1</institucion>
+        			</pariente_estado>
+        			<pariente_estado codigo="2">
+            			<nombre>Pariente 2</nombre>
+            			<parentesco>A</parentesco>
+            			<cargo>E</cargo>
+            			<institucion>Institucion 2</institucion>
+        			</pariente_estado>
+    		</parientes_estado>
+	</fisicas>
+	<administrativos>
+    		<distribuidor>10081</distribuidor>
+    		<agente>61839</agente>
+    		<sucursal>56103</sucursal>
+    		<mail>MODIFICA_PN.com</mail>
+    		<codigo_tin>11</codigo_tin>
+    		<relacion_pais>relacion 1</relacion_pais>
+    		<pais_impuestos>136</pais_impuestos>
+    		<direccion_envio>P</direccion_envio>
+    		<periodicidad_cartola>C</periodicidad_cartola>
+    		<institucional>N</institucional>
+    		<pensionado>N</pensionado>
+    		<calificado>S</calificado>
+    		<omitir_csc>N</omitir_csc>
+    		<expuesto_politicamente>N</expuesto_politicamente>
+    		<omitir_cgf>N</omitir_cgf>
+    		<relacionado_agf>A</relacionado_agf>
+    		<cta_cte_en_banco>N</cta_cte_en_banco>
+    		<inversiones_en_banco>N</inversiones_en_banco>
+    		<inversiones_en_gestora>N</inversiones_en_gestora>
+	</administrativos>
+	<direccion tipo="P" principal="S">
+    		<tipo_vivienda>P</tipo_vivienda>
+    		<siglas_domicilio>AG</siglas_domicilio>
+    		<domicilio>LAS VISCACHAS 123</domicilio>
+    		<numero>1231</numero>
+    		<piso>2</piso>
+    		<municipio>Alhué</municipio>
+    		<provincia>35</provincia>
+    		<comunidad>13</comunidad>
+    		<pais>39</pais>
+    		<telefono_pais>1</telefono_pais>
+    		<telefono_area>2</telefono_area>
+    		<telefono>3</telefono>
+    		<telefono2_pais>1</telefono2_pais>
+    		<telefono2_area>2</telefono2_area>
+    		<telefono2>3</telefono2>
+	</direccion>
+	<cuentas_cc>
+    		<cuenta_cc principal="N">
+        			<numero_cta>222111</numero_cta>
+        			<banco>1227</banco>
+        			<divisa>40</divisa>
+        			<codigo_swift>12345678</codigo_swift>
+    		</cuenta_cc>
+    		<cuenta_cc principal="S">
+        			<numero_cta>6556565656</numero_cta>
+        			<banco>1227</banco>
+        			<divisa>51</divisa>
+        			<codigo_swift>12345678</codigo_swift>
+    		</cuenta_cc>
+    		<cuenta_cc principal="N">
+        			<numero_cta>10379151</numero_cta>
+        			<banco>1227</banco>
+        			<divisa>39</divisa>
+    		</cuenta_cc>
+	</cuentas_cc>		
+	<representantes>
+    		<representante tipo="P">
+        			<entidad tipo="F">
+            			<nombre>ALDO</nombre>
+            			<apellido1>DUQUE</apellido1>
+            			<apellido2>DUQUE</apellido2>
+            			<id_fiscal>123</id_fiscal>
+            			<dv>6</dv>
+            			<fecha_alta>23/10/2014</fecha_alta>
+        			</entidad>
+    		</representante>
+</representantes>
+</participe>
