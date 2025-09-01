@@ -33,17 +33,7 @@
             			<fecha_servicio>01/01/1980</fecha_servicio>
             			<institucion>Institucion 1</institucion>
         		</trabajo_estado>
-        			<trabajo_estado codigo="2">
-            			<cargo>C</cargo>
-            			<fecha_servicio>01/01/1981</fecha_servicio>
-            			<institucion>Institucion 2</institucion>
-        			</trabajo_estado>
-        			<trabajo_estado codigo="3">
-            			<cargo>D</cargo>
-            			<fecha_servicio>01/01/1983</fecha_servicio>
-            			<institucion>Institucion 3</institucion>
-        			</trabajo_estado>
-    		</trabajos_estado>
+          	</trabajos_estado>
     		<parientes_estado>
         			<pariente_estado codigo="1">
             			<nombre>Pariente 1</nombre>
