@@ -95,9 +95,9 @@ function llenadoFiltros( f1, f2, estadoLetras, estadoNumero)
 
 // 1. Activa la tab "Gestión Archivos" si es necesario
 function activarTabGestionArchivos() {
-  const tabContainer = document.getElementById('myForm:ncgTabView');
+  const tabContainer = document.getElementById('myForm');
   if (!tabContainer) {
-    alert('No se encontró el contenedor de tabs (id: myForm:ncgTabView)');
+    alert('No se encontró el contenedor de tabs (id: myForm)');
     return false;
   }
   // Busca el tab con texto "Gestión Archivos"
@@ -114,9 +114,9 @@ function activarTabGestionArchivos() {
 
 // 2. Extrae los datos de la tabla "Gestión Archivos"
 function mostrarDatosGestionArchivos() {
-  const tabla = document.getElementById('myForm:ncgTabView:archivosDataTable');
+  const tabla = document.getElementById('myForm:archivosDataTable');
   if (!tabla) {
-    alert('No se encontró la tabla de Gestión Archivos (id: myForm:ncgTabView:archivosDataTable)');
+    alert('No se encontró la tabla de Gestión Archivos (id: myForm:archivosDataTable)');
     return;
   }
   const tbody = tabla.querySelector('tbody');
@@ -158,7 +158,7 @@ function mostrarDatosGestionArchivos() {
 
 // PARTE 1: Definición de la función
 function copiarDatosGestionArchivos() {
-  const tbody = document.getElementById('myForm:ncgTabView:archivosDataTable_data');
+  const tbody = document.getElementById('myForm:archivosDataTable_data');
   if (!tbody) {
     alert('No se encontró la tabla de archivos');
     return;
@@ -217,7 +217,7 @@ function copiarDatosGestionArchivos() {
 async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetalle = false } = {}) {
   // Función para obtener filas actuales de la tabla principal
   function obtenerFilasTablaPrincipal() {
-    const tbody = document.getElementById('myForm:ncgTabView:archivosDataTable_data');
+    const tbody = document.getElementById('myForm:archivosDataTable_data');
     return tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
   }
 
@@ -225,10 +225,10 @@ async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetall
   async function esperarDetalleCompleto(timeout = 15000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const detalle = document.getElementById('myForm:ncgTabView:gestionRegistrosTab');
+      const detalle = document.getElementById('myForm:gestionRegistrosTab');
       if (detalle) {
         // Busca la tabla interna de registros
-        const tabla = detalle.querySelector('#myForm\\:ncgTabView\\:registrosDataTable_data');
+        const tabla = detalle.querySelector('#myForm\\:registrosDataTable_data');
         if (tabla && tabla.querySelector('tr')) {
           return detalle;
         }
@@ -240,7 +240,7 @@ async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetall
 
   // Selector correcto para la aleta "Gestión de Archivos"
   function clickTabGestionArchivos() {
-    const tabGestion = document.querySelector('a[href="#myForm:ncgTabView:gestionArchivosTab"]');
+    const tabGestion = document.querySelector('a[href="#myForm:gestionArchivosTab"]');
     if (tabGestion) tabGestion.click();
     else alert("No se encontró la aleta de la ficha Gestión de Archivos");
   }
@@ -268,7 +268,7 @@ async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetall
     tdSeleccionable.scrollIntoView({ behavior: "smooth", block: "center" });
 
     // Guarda el HTML del detalle antes del click
-    const htmlAntes = document.getElementById('myForm:ncgTabView:gestionRegistrosTab')?.innerHTML || "";
+    const htmlAntes = document.getElementById('myForm:gestionRegistrosTab')?.innerHTML || "";
 
     // Realiza el click en la celda seleccionable
     tdSeleccionable.click();
@@ -276,7 +276,7 @@ async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetall
 
     // Espera y revisa si cambió el detalle
     await new Promise(res => setTimeout(res, 1000)); // Ajusta tiempo según tu app
-    const htmlDespues = document.getElementById('myForm:ncgTabView:gestionRegistrosTab')?.innerHTML || "";
+    const htmlDespues = document.getElementById('myForm:gestionRegistrosTab')?.innerHTML || "";
     if (!htmlAntes && htmlDespues) {
       console.log("¡El componente de detalle se agregó tras el click!");
     } else if (htmlAntes !== htmlDespues) {
@@ -319,3 +319,4 @@ BtnBuscar();
 
 // Espera 20 segundos por fila
 recorrerArchivosFilaPorFila({ tiempoEspera: 5000, extraerDetalle: false });
+
