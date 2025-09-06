@@ -295,13 +295,19 @@ async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetall
     }
 
     // Espera el tiempo necesario para revisar el detalle
-    await new Promise(res => setTimeout(res, tiempoEspera));
-
+    // await new Promise(res => setTimeout(res, tiempoEspera));
+    alert("Espera el tiempo que yo quiero");
     // Extrae los datos del detalle si lo deseas
     if (extraerDetalle && typeof copiarTablaDetalleGestionArchivos === "function") {
       copiarTablaDetalleGestionArchivos();
       // Puedes guardar resultados en un array si quieres toda la info junta
     }
+
+    // Aca pedir a Copilot que  clickee en la accion
+    // para abrir Panel, ver la info
+    // mantener con alert y luego clic en 
+    // cerrar panel... todos los controles están
+    // en la misma página
 
     // Volver a la pestaña principal
     clickTabGestionArchivos();
@@ -319,4 +325,3 @@ BtnBuscar();
 
 // Espera 20 segundos por fila
 recorrerArchivosFilaPorFila({ tiempoEspera: 5000, extraerDetalle: false });
-
