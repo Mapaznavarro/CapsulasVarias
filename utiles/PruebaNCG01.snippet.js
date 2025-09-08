@@ -221,19 +221,21 @@ function abrirRutasDeTablaDetalle(tablaDetalleId = 'myForm:registrosDataTable_da
     return;
   }
   const filas = Array.from(tabla.querySelectorAll('tr'));
-  if (filas.length < 2) {
+  if (filas.length < 1) {
     alert('La tabla de detalle no tiene suficientes filas');
     return;
   }
 
-  // Empezar en 1 para saltar encabezado
-  for (let i = 1; i < filas.length; i++) {
+  // Empezar en 0 para saltar encabezado
+  // Encabezado es aparte
+  for (let i = 0; i < filas.length; i++) {
     const celdas = filas[i].querySelectorAll('td');
     if (celdas.length === 0) continue;
 
     // Buscar <a> en la última celda
     const ultimaCelda = celdas[celdas.length - 1];
     const link = ultimaCelda.querySelector('a');
+    alert(`Se va a clickear link`);
     if (link && link.href.startsWith("http")) {
       link.click(); // Simula el click como usuario
       alert(`Se abrió el link. Por favor, revisa la pestaña y ciérrala cuando termines. Haz click en OK para continuar con la siguiente fila.`);
