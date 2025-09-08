@@ -226,22 +226,22 @@ function abrirRutasDeTablaDetalle(tablaDetalleId = 'myForm:registrosDataTable_da
     return;
   }
 
-  // Suponiendo que la última celda de cada fila (excepto la primera/títulos) contiene la ruta
-  for (let i = 1; i < filas.length; i++) { // Empezar en 1 para saltar encabezado
+  // Empezar en 1 para saltar encabezado
+  for (let i = 1; i < filas.length; i++) {
     const celdas = filas[i].querySelectorAll('td');
     if (celdas.length === 0) continue;
-    const ruta = celdas[celdas.length - 1].textContent.trim();
-    // Solo abrir si la ruta parece válida
-    if (ruta && ruta.startsWith("http")) {
-      window.open(ruta, '_blank');
-      console.log(`Abriendo ruta en nueva pestaña: ${ruta}`);
+
+    // Buscar <a> en la última celda
+    const ultimaCelda = celdas[celdas.length - 1];
+    const link = ultimaCelda.querySelector('a');
+    if (link && link.href.startsWith("http")) {
+      link.click(); // Simula el click como usuario
+      alert(`Se abrió el link. Por favor, revisa la pestaña y ciérrala cuando termines. Haz click en OK para continuar con la siguiente fila.`);
     } else {
-      // Si la ruta no es un link http, puedes decidir si mostrarla o no
-      console.log(`Fila ${i + 1}: No se detectó ruta válida: ${ruta}`);
+      console.log(`Fila ${i + 1}: No se detectó link válido en la última celda.`);
     }
   }
 }
-
 
 // MODIFICACIÓN: Llama a la función abrirRutasDeTablaDetalle después de esperarDetalleCompleto
 async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetalle = false, abrirRutas = true } = {}) {
