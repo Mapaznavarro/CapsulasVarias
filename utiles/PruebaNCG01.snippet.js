@@ -214,20 +214,47 @@ function copiarDatosGestionArchivos() {
   setTimeout(() => { document.body.removeChild(ta); }, 5000);
 }
 
-async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetalle = false } = {}) {
-  // Función para obtener filas actuales de la tabla principal
+function abrirRutasDeTablaDetalle(tablaDetalleId = 'myForm:registrosDataTable_data') {
+  const tabla = document.getElementById(tablaDetalleId);
+  if (!tabla) {
+    alert('No se encontró la tabla de detalle de registros');
+    return;
+  }
+  const filas = Array.from(tabla.querySelectorAll('tr'));
+  if (filas.length < 2) {
+    alert('La tabla de detalle no tiene suficientes filas');
+    return;
+  }
+
+  // Suponiendo que la última celda de cada fila (excepto la primera/títulos) contiene la ruta
+  for (let i = 1; i < filas.length; i++) { // Empezar en 1 para saltar encabezado
+    const celdas = filas[i].querySelectorAll('td');
+    if (celdas.length === 0) continue;
+    const ruta = celdas[celdas.length - 1].textContent.trim();
+    // Solo abrir si la ruta parece válida
+    if (ruta && ruta.startsWith("http")) {
+      window.open(ruta, '_blank');
+      console.log(`Abriendo ruta en nueva pestaña: ${ruta}`);
+    } else {
+      // Si la ruta no es un link http, puedes decidir si mostrarla o no
+      console.log(`Fila ${i + 1}: No se detectó ruta válida: ${ruta}`);
+    }
+  }
+}
+
+
+// MODIFICACIÓN: Llama a la función abrirRutasDeTablaDetalle después de esperarDetalleCompleto
+async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetalle = false, abrirRutas = true } = {}) {
   function obtenerFilasTablaPrincipal() {
     const tbody = document.getElementById('myForm:archivosDataTable_data');
     return tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
   }
 
-  // Espera a que el detalle y su tabla interna estén realmente cargados
   async function esperarDetalleCompleto(timeout = 15000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       const detalle = document.getElementById('myForm:gestionRegistrosTab');
       if (detalle) {
-        // Busca la tabla interna de registros
         const tabla = detalle.querySelector('#myForm\\:registrosDataTable_data');
         if (tabla && tabla.querySelector('tr')) {
           return detalle;
@@ -238,78 +265,44 @@ async function recorrerArchivosFilaPorFila({ tiempoEspera = 20000, extraerDetall
     return null;
   }
 
-  // Selector correcto para la aleta "Gestión de Archivos"
   function clickTabGestionArchivos() {
     const tabGestion = document.querySelector('a[href="#myForm:gestionArchivosTab"]');
     if (tabGestion) tabGestion.click();
     else alert("No se encontró la aleta de la ficha Gestión de Archivos");
   }
 
-  // Guardamos el número de filas al inicio
   const filas = obtenerFilasTablaPrincipal();
   const totalFilas = filas.length;
 
   for (let i = 0; i < totalFilas; i++) {
     const filasActuales = obtenerFilasTablaPrincipal();
     const fila = filasActuales[i];
-    if (!fila) {
-      console.warn(`No se encontró la fila ${i + 1}`);
-      continue;
-    }
+    if (!fila) continue;
 
-    // Elegir la celda clickeable (primer <td> que NO tenga la clase actionColumn)
     const tdSeleccionable = Array.from(fila.querySelectorAll('td')).find(td => !td.classList.contains('actionColumn'));
-    if (!tdSeleccionable) {
-      console.warn(`No se encontró celda clickeable en la fila ${i + 1}`);
-      continue;
-    }
+    if (!tdSeleccionable) continue;
 
-    // Hacemos scroll y clic en la celda correcta
     tdSeleccionable.scrollIntoView({ behavior: "smooth", block: "center" });
-
-    // Guarda el HTML del detalle antes del click
     const htmlAntes = document.getElementById('myForm:gestionRegistrosTab')?.innerHTML || "";
-
-    // Realiza el click en la celda seleccionable
     tdSeleccionable.click();
-    console.log(`Clic en fila ${i + 1}, celda:`, tdSeleccionable.textContent.trim());
 
-    // Espera y revisa si cambió el detalle
-    await new Promise(res => setTimeout(res, 1000)); // Ajusta tiempo según tu app
+    await new Promise(res => setTimeout(res, 1000));
     const htmlDespues = document.getElementById('myForm:gestionRegistrosTab')?.innerHTML || "";
-    if (!htmlAntes && htmlDespues) {
-      console.log("¡El componente de detalle se agregó tras el click!");
-    } else if (htmlAntes !== htmlDespues) {
-      console.log("¡El componente de detalle cambió tras el click!");
-    } else {
-      console.warn("No cambió el componente de detalle tras el click.");
-    }
-
-    // Espera a que el detalle y su contenido estén realmente cargados (máx 15 segundos)
     const detalle = await esperarDetalleCompleto(15000);
     if (!detalle) {
-      console.warn(`No apareció el detalle completo para la fila ${i + 1}`);
       clickTabGestionArchivos();
       await new Promise(res => setTimeout(res, 2000));
       continue;
     }
 
-    // Espera el tiempo necesario para revisar el detalle
-    // await new Promise(res => setTimeout(res, tiempoEspera));
-    alert("Espera el tiempo que yo quiero");
+    // MODIFICACIÓN: Abre rutas en nueva pestaña
+    if (abrirRutas) abrirRutasDeTablaDetalle('myForm:registrosDataTable_data');
+
     // Extrae los datos del detalle si lo deseas
     if (extraerDetalle && typeof copiarTablaDetalleGestionArchivos === "function") {
       copiarTablaDetalleGestionArchivos();
-      // Puedes guardar resultados en un array si quieres toda la info junta
     }
 
-    // Aca pedir a Copilot que  clickee en la accion
-    // para abrir Panel, ver la info
-    // mantener con alert y luego clic en 
-    // cerrar panel... todos los controles están
-    // en la misma página
-
-    // Volver a la pestaña principal
     clickTabGestionArchivos();
     await new Promise(res => setTimeout(res, 2000));
   }
