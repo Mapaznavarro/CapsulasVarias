@@ -1,0 +1,109 @@
+CREATE OR REPLACE PROCEDURE INY_DF.CREAR_DOC (x_origen bigint,
+                                              x_cl_origen bigint,
+                                              x_fecha date,
+                                              x_rut integer,
+                                              x_nombre varchar(600),
+                                              x_tipo_v varchar(100),
+                                              x_glosa varchar(250),
+                                              x_cod_prod varchar(100),
+                                              x_desc_prod varchar(200),
+                                              x_moneda bigint,
+                                              x_monto_sin_iva double,
+                                              x_iva double,
+                                              x_monto_total double,
+                                              x_precio double,
+                                              x_cta_analisis varchar(100),
+                                              x_centro_neg varchar(100))
+specific INY_DF.CREAR_DOC
+DYNAMIC RESULT SETS 1
+-- Crea un nuevo documento para ingresarlo al motor de inyeccion
+P1: BEGIN
+declare x_error integer default 0;
+declare x_msg varchar(200) default 'Documento Creado con Éxito';
+declare x_clave_doc, x_clave_cli, x_tipo bigint;
+declare x_exento integer;
+DECLARE cursor1 CURSOR WITH RETURN FOR
+  SELECT x_error, x_msg, x_clave_doc
+  FROM table(values(1)) as x;
+set (x_exento, x_tipo)=(select t.exento, t.clave from iny_df.documentos_tipos t where t.codigo=x_tipo_v);
+if x_rut is null then
+  set x_error=1;
+  set x_msg='El rut es un campo obligatorio';
+elseif not exists (select 1 from iny_df.documentos_tipos t where t.codigo=x_tipo_v)  then
+  set x_error=1;
+  set x_msg='El tipo de documento es un campo obligatorio';
+elseif coalesce(x_monto_sin_iva, 0.0)+coalesce(x_iva, 0.0)+coalesce(x_monto_total, 0.0)=0.0 then
+  set x_error=1;
+  set x_msg='Los campos de monto son obligatorios'; 
+elseif x_rut>52000000 and exists(select 1 from db2admin.fondos f where f.rut_gather=x_rut and f.tipo_fondo not in ('ADM_CAR') and f.grupo not in (3)) then
+  if exists(select 1 from iny_df.clientes_dia where rut=x_rut and estado=1) then   
+    set x_clave_cli=(select clave from iny_df.clientes_dia where rut=x_rut and estado=1); 
+  --elseif exists(select 1 from db2admin.clientes where rut=x_rut) then 
+  --  INSERT INTO INY_DF.CLIENTES_DIA
+  --    (FECHA, CL_CLIENTE, RUT, RAZON_SOCIAL, DIRECCION, COMUNA, PROVINCIA, EMAIL, ESTADO, F_CREA, F_UPD)
+  --  select coalesce(x_fecha, current date), cl.clave, cl.rut, cl.n_completo, cl.direccion, c.nombre, p.descripcion, cl.email_part, 2, current timestamp, current timestamp
+  --    from db2admin.clientes cl
+  --         left join db2admin.comunas c on cl.comuna=c.clave
+  --         left join db2admin.provincias p on cl.provincia=p.clave     
+  --    where cl.rut=x_rut;
+  --  commit;
+  else
+    INSERT INTO INY_DF.CLIENTES_DIA
+      (FECHA, RUT, RAZON_SOCIAL, DIRECCION, COMUNA, PROVINCIA, ESTADO, F_CREA, F_UPD)
+    VALUES(coalesce(x_fecha, current date), x_rut, x_nombre, 'MAGDALENA 140, PISO 7', 'LAS CONDES', 'SANTIAGO', 2, current timestamp, current timestamp);
+    values identity_val_local() into x_clave_cli;
+  end if; 
+  INSERT INTO INY_DF.DOCUMENTOS
+    (FECHA, ORIGEN, CL_ORIGEN, CLIENTE, GLOSA, FOLIO, EXENTO, TIPO, ESTADO_DF, ESTADO, ESTADO_TOT, ACTUALIZADO, F_CREA, F_UPD)
+  VALUES 
+    (coalesce(x_fecha, current date), x_origen, x_cl_origen, x_clave_cli, x_glosa, null, x_exento, x_tipo, 19, 19, 100, 0, current timestamp, current timestamp);
+  values identity_val_local() into x_clave_doc;
+  commit;
+  INSERT INTO INY_DF.DOC_DETALLE
+    (DOCUMENTO, FECHA, CLIENTE, COD_PROD, PRODUCTO, MONEDA, MONTO, IVA, TOTAL, PRECIO, CTA_ANALISIS, CENTRO_NEG, F_CARGA)
+  VALUES 
+    (x_clave_doc, coalesce(x_fecha, current date), x_clave_cli, x_cod_prod, x_desc_prod, x_moneda, x_monto_sin_iva, x_iva, x_monto_total, x_precio, x_cta_analisis, x_centro_neg, current timestamp);
+else
+  if x_rut=60706000 and exists(select 1 from iny_df.clientes_dia where rut=x_rut and fecha=x_fecha and date(f_crea)=current date) then  
+    set x_clave_cli=(select clave from iny_df.clientes_dia where rut=x_rut and fecha=x_fecha and date(f_crea)=current date);
+    UPDATE INY_DF.CLIENTES_DIA
+      set estado=2
+      where rut=x_rut and fecha=x_fecha and date(f_crea)=current date and estado<>2;
+    commit;
+  elseif exists(select 1 from iny_df.clientes_dia where rut=x_rut and estado=1) then   
+    set x_clave_cli=(select clave from iny_df.clientes_dia where rut=x_rut and estado=1); 
+  elseif exists(select 1 from db2admin.clientes where rut=x_rut) then 
+    INSERT INTO INY_DF.CLIENTES_DIA
+      (FECHA, CL_CLIENTE, RUT, RAZON_SOCIAL, DIRECCION, COMUNA, PROVINCIA, EMAIL, CODIGO_ACT, GLOSA_ACT, ESTADO, F_CREA, F_UPD)
+    select coalesce(x_fecha, current date), cl.clave, cl.rut, cl.n_completo, cl.direccion, c.nombre, p.descripcion, cl.email_part, 
+           case when x_rut=60706000 then '841100' end, case when x_rut=60706000 then 'ACTIVIDADES DE LA ADMINISTRACIÓN PÚBLICA EN GENERAL' end, 
+           case when x_rut=60706000 then 2 else 1 end, current timestamp, current timestamp
+      from db2admin.clientes cl
+           left join db2admin.comunas c on cl.comuna=c.clave
+           left join db2admin.provincias p on cl.provincia=p.clave     
+      where cl.rut=x_rut;
+    commit;
+  else
+    INSERT INTO INY_DF.CLIENTES_DIA
+      (FECHA, RUT, RAZON_SOCIAL, ESTADO, F_CREA, F_UPD)
+    VALUES(coalesce(x_fecha, current date), x_rut, x_nombre, 1, current timestamp, current timestamp);
+  end if; 
+  if x_rut=60706000 then 
+    set x_clave_cli=(select clave from iny_df.clientes_dia where rut=x_rut and fecha=x_fecha and date(f_crea)=current date);
+  else 
+    set x_clave_cli=(select clave from iny_df.clientes_dia where rut=x_rut and estado=1);
+  end if;
+  INSERT INTO INY_DF.DOCUMENTOS
+    (FECHA, ORIGEN, CL_ORIGEN, CLIENTE, GLOSA, FOLIO, EXENTO, TIPO, ESTADO_DF, ESTADO, ESTADO_TOT, ACTUALIZADO, F_CREA, F_UPD)
+  VALUES 
+    (coalesce(x_fecha, current date), x_origen, x_cl_origen, x_clave_cli, x_glosa, null, x_exento, x_tipo, 19, 19, 100, 0, current timestamp, current timestamp);
+  values identity_val_local() into x_clave_doc;
+  commit;
+  INSERT INTO INY_DF.DOC_DETALLE
+    (DOCUMENTO, FECHA, CLIENTE, COD_PROD, PRODUCTO, MONEDA, MONTO, IVA, TOTAL, PRECIO, CTA_ANALISIS, CENTRO_NEG, F_CARGA)
+  VALUES 
+    (x_clave_doc, coalesce(x_fecha, current date), x_clave_cli, x_cod_prod, x_desc_prod, x_moneda, x_monto_sin_iva, x_iva, x_monto_total, x_precio, x_cta_analisis, x_centro_neg, current timestamp);         
+end if;
+commit;
+OPEN cursor1;
+END P1 
