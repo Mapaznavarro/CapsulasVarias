@@ -31,6 +31,8 @@ Los estados financieros presentan razonablemente, en todos sus aspectos signific
 
 #### Cifras Principales - Año 2024 (en miles de pesos chilenos - M$)
 
+> **Nota sobre formato numérico:** Las cifras utilizan el formato chileno con punto como separador de miles (ej: 235.500.560 = 235,500,560 en formato internacional).
+
 ##### Estado de Situación Financiera al 31 de diciembre de 2024
 | Concepto | 2024 (M$) | 2023 (M$) |
 |----------|-----------|-----------|
@@ -127,7 +129,7 @@ Esta normativa es fundamental porque:
 - **NIIF/IFRS:** Normas Internacionales de Información Financiera
 
 ## Fecha de Actualización
-Última actualización: Noviembre 2024
+Última actualización: 4 de noviembre de 2024
 
 ## Notas
 - Las cifras están expresadas en miles de pesos chilenos (M$) salvo indicación contraria

@@ -56,4 +56,4 @@ La Comisión para el Mercado Financiero supervisa y regula las actividades de la
 - **UF:** Unidad de Fomento
 
 ## Última Actualización
-Noviembre 2024
+4 de noviembre de 2024
