@@ -1,0 +1,1731 @@
+CREATE OR REPLACE PROCEDURE "GESTION"."IdCivil _PROD"()
+specific gestion.IdCivil _prod
+-- LA VERDADERA
+--carga tabla sumarizadas para reportes de BP
+-- x_formato: 1=PDF, 2=Excel NO USAR PDF
+-- Se cargan todos los IdCivil , los de BP se marcan con un 1, el resto con 0
+P1:
+SPECIFIC IdCivil _PROD
+BEGIN
+declare x_fecha, x_hoy, x_fecha_ini, x_fecha_fin date;
+declare x_clave, x_iter, x_carga, x_ano, x_mes, x_fin, x_cl_carga,
+        x_num_cust_rv, x_num_cust_rf, x_num_cust_if integer default 0;
+call ADMIN.LOG_GCB(120, 'IdCivil _PROD INI', 1, 0, '', 0.0);
+commit;
+-- si hay un proceso de carga pendiente de la última hora, no carga
+set x_cl_carga=(select max(clave) from er.calcular_IdCivil _prod);
+if exists(select 1
+            from er.calcular_IdCivil _prod e
+            where e.clave=x_clave and e.fecha_ini is not null and fecha_fin is null and 
+                  date(e.fecha_ini)=current date and e.fecha_ini>=current timestamp-1 hour) then
+  return;
+elseif not exists(select 1
+                    from er.calcular_IdCivil _prod e
+                    where e.clave=x_clave and e.fecha_ini is not null and fecha_fin is null) then
+  
+  INSERT INTO ER.CALCULAR_IdCivil _PROD (USUARIO, FECHA_INI, FECHA_FIN) VALUES ('DB2ADMIN', current timestamp, null);
+  VALUES IDENTITY_VAL_LOCAL() INTO x_cl_carga;
+end if;
+set x_hoy=current date - 1 day;
+-- algoritmos de carga:
+--   -1: si estamos antes del 15, carga este mes y el anterior, despuÃ©s sÃ³lo carga este mes
+--   -N: carga los ultimos N meses
+--   0: No carga nada
+--   >0: nÃºmero de dÃ­as a cargar antes de hoy
+set x_carga=coalesce((select p.p_int -- algoritmo de carga
+                        from gestion.parametros p
+                        where p.codigo=21), -1);
+commit;
+call ADMIN.LOG_GCB(120, 'IdCivil _PROD PARAM DÍAS a CARGAR (Algor de Carga)', 3, x_carga, '', 0.0);
+commit;
+if x_carga<-12 or x_carga>300 or x_carga=0 then
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD FIN por Algoritmo de Carga', 4, x_carga, '', 0.0);
+  commit;
+  return;
+end if;
+if x_carga=-1 then
+  set x_fecha=case when day(x_hoy)<15 then productos.join_fecha(1, month(x_hoy), year(x_hoy))-1 month
+                        else productos.join_fecha(1, month(x_hoy), year(x_hoy)) end;
+--  set x_fecha=productos.join_fecha(1, month(x_hoy), year(x_hoy))-1 month; -- BORRAR esta linea
+elseif x_carga<-1 then
+  set x_fecha=productos.join_fecha(1, month(x_hoy), year(x_hoy)) + (x_carga+1) month;
+else
+  set x_fecha=current date - x_carga days;
+end if;
+--set x_fecha=date('01/01/2021');
+if x_fecha<date('01/01/2013') then
+  set x_fecha=date('01/01/2013');
+end if;
+commit;
+call ADMIN.LOG_GCB(120, 'IdCivil _PROD PARAM Fecha Inicio de Carga', 5, x_carga, ltrim(rtrim(char(x_fecha))), 0.0);
+commit;
+--if exists(select 1
+--            from paso.IdCivil _bp bp) and x_carga=-1 then -- solo se ejecuta en los casos normales y que hayan datos
+--  update base.clientes cl
+--    set cl.bp=coalesce((select 1
+--                          from paso.IdCivil _bp bp
+--                          where bp.IdCivil =cl.IdCivil 
+--                          fetch first 1 rows only), 0);
+--end if;
+set x_iter=1;
+--set x_fecha=date('01/01/2013');
+set x_fecha_ini=x_fecha;
+Iteracion: LOOP -- fechas ascendentes
+  if x_fecha<productos.join_fecha(1, 1, 2013) then
+    leave iteracion;
+  end if;
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 ITER INI (por borrar)', 10, 
+                      (select count(*)
+                         from gestion.IdCivil _prod_dia rpd
+                         where rpd.fecha=x_fecha), char(x_fecha), 0.0);
+  commit;
+  delete from gestion.IdCivil _prod_dia rp where rp.fecha=x_fecha;
+  commit;
+  --delete from gestion.IdCivil _prod_dia rpd where year(rpd.fecha)=year(x_fecha) and month(rpd.fecha)=month(x_fecha) and rpd.producto=114; -- descuadre Pershing se hace una vez por mes todos los dÃ­as
+  --commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 ITER DEL (Iteración)', 13, x_iter, char(x_fecha), 0.0);
+  commit;
+  INSERT INTO GESTION.IdCivil _prod_dia(ORIGEN, ANO, MES, FECHA, 
+                                   CLIENTE, EJECUTIVO, SUCURSAL, REGIONAL, CANAL, GERENCIA, PRODUCTO, 
+                                   ORDEN, MONTO_TX, MONTO_TX_MON, INGRESOS, DERECHOS, CUSTODIA, CANT_TX, CANT_FACT)
+  with  
+    fecha(fecha, hoy) as
+      (select x_fecha, current date - 1 day
+         from table(values(1)) as x),
+    mes(fecha, ano, mes, periodo, hoy, fecha_fin_mes) as
+      (select f.fecha, year(f.fecha), month(f.fecha),
+              double(days(productos.join_fecha(1, month(f.fecha), year(f.fecha))+1 month-1 day) - 
+                     days(productos.join_fecha(1, month(f.fecha), year(f.fecha))) + 1),
+              f.hoy,
+              case when year(f.hoy)=year(f.fecha) and month(f.hoy)=month(f.fecha) 
+                     then f.hoy
+                   else productos.join_fecha(1, month(f.fecha), year(f.fecha))+1 month-1 day end
+         from fecha f),
+    t(ano, mes, fecha, hoy,
+      fecha_fin_mes,
+      periodo_completo, periodo_parcial,
+      fecha_fin_mes_calendario) as -- periodo son los dias del mes
+                                            -- completo=todo el mes
+                                            -- parcial, son los dÃ­as cuando el mes no ha terminado
+      (select m.ano, m.mes, m.fecha, m.hoy, m.fecha_fin_mes, m.periodo,
+              double(days(m.fecha_fin_mes) - days(productos.join_fecha(1, m.mes, m.ano)) + 1),
+              productos.join_fecha(1, m.mes, m.ano)+1 month-1 day
+         from mes m),
+    prod(clave, orden) as 
+      (select p.clave, p.orden
+         from gestion.productos p),
+    cust(cliente, producto, custodia) as
+      (select c.cliente, 1, --'Acciones Nacionales',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               --c.can_ven_plazo=0.0 and c.can_com_plazo=0.0 and 
+               c.sec_IdCivil _cli not in (67, 77, 87, 97) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=1)
+         group by c.cliente
+       union all
+       select c.cliente, 41, --'Custodia ADP DIVIDENDOS',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               c.sec_IdCivil _cli=67 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=41)
+         group by c.cliente
+         
+      union all
+       select c.cliente, 200, --'Custodia ADP  fundamental',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               c.sec_IdCivil _cli=77 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=200)
+         group by c.cliente
+       union all
+       select c.cliente, 202, --'Custodia ADP  Táctico ',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               c.sec_IdCivil _cli=87 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=202)
+         group by c.cliente
+       union all
+       select c.cliente, 204, --'Custodia ADP  ASG ',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               c.sec_IdCivil _cli=97 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=204)
+         group by c.cliente           
+       union all
+       select c.cliente, 209, --'Custodia ADP Estados Unidos ',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AO' and  --se suman las con plazo y las sin plazo
+               c.sec_IdCivil _cli=57 and c.IdCivil  not in (14456454, 96519800) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=209)
+         group by c.cliente           
+       union all
+       select c.cliente, 21, --'ETF Nacionales',
+              sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- sum(c.monto_valoriz)
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='EN' and  --se suman las con plazo y las sin plazo
+               --c.can_ven_plazo=0.0 and c.can_com_plazo=0.0 and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=21)
+         group by c.cliente
+       union all
+       select c.cliente, 170, --'CFI' Costo Fondo Inversion
+              sum((c.can_custodia+c.can_garantia)*coalesce(c.monto_p, c.precio_cierre))  --antes:sum((c.can_custodia+c.can_garantia)*coalesce(c.monto_p, precio_cierre)) 
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='CF' and  
+               exists(select 1
+                        from prod prod
+                        where prod.clave=170)
+         group by c.cliente
+       union all
+       select c.cliente, 2, --'Simultaneas',
+              sum((c.can_ven_plazo+c.can_com_plazo)*c.precio_cierre) 
+         from gestion.cust_rv_dia c, t t 
+         where c.fecha=t.fecha and c.mercado='AC' and
+               not(c.can_ven_plazo=0.0 and c.can_com_plazo=0.0) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=2)
+         group by c.cliente
+       union all
+       select c.cliente, 3, --'Renta Fija',
+              --sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- 
+              sum(c.monto_valoriz)
+         from gestion.cust_rf_dia c, t t 
+         where c.fecha=t.fecha and --c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               --c.can_ven_plazo=0.0 and c.can_com_plazo=0.0 and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=3)
+         group by c.cliente
+       union all
+       select c.cliente, 4, --'IntermediaciÃ³n Financiera',
+              --sum((c.can_custodia+c.can_garantia)*c.precio_cierre) -- 
+              sum(c.monto_valoriz)
+         from gestion.cust_if_dia c, t t 
+         where c.fecha=t.fecha and --c.mercado='AC' and  --se suman las con plazo y las sin plazo
+               --c.can_ven_plazo=0.0 and c.can_com_plazo=0.0 and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=4)
+         group by c.cliente
+       union all
+       select pcl.cliente_base, 5, --'Pactos', 
+              sum(m.monto_capital) --/t.periodo_parcial)
+         from productos.pac_saldos_mes m, productos.p58_clientes pcl, t t
+         where m.cliente=pcl.clave and m.estado in ('T', 'E', 'A') and
+               m.ano=t.ano and m.mes=t.mes and 
+               m.fecha_inicial<=t.fecha and m.fecha_final>=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=5)
+         group by pcl.cliente_base
+       union all 
+       select ct.cliente, 10, -- Mercad Internacional Renta Variable 
+              sum(ct.valor_comercial*productos.fm_cambio('DO', ct.fecha))
+         from gestion.cust_int ct, t t
+         where upper(ct.mercado)=upper('Equity') and ct.fecha=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=10)
+         group by ct.cliente
+       union all
+       select ct.cliente, 11, --'Mercado Internacional Renta Fija'
+              sum(ct.valor_comercial*productos.fm_cambio('DO', ct.fecha))
+         from gestion.cust_int ct, t t
+         where upper(ct.mercado)=upper('Fixed Income') and ct.fecha=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=11)
+         group by ct.cliente
+       union all
+       select ct.cliente, 12, --'Mercado Internacional FFMM'
+              sum(ct.valor_comercial*productos.fm_cambio('DO', ct.fecha))
+         from gestion.cust_int ct, t t
+         where upper(ct.mercado)=upper('Mutual Fund') and ct.fecha=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=12)
+         group by ct.cliente
+       union all
+       select ct.cliente, 13, --'Mercado Internacional CASH', 
+              sum(ct.valor_comercial*productos.fm_cambio('DO', ct.fecha)) -- 517.91
+         from gestion.cust_int ct, t t
+         where upper(ct.mercado)=upper('Cash and Equivalents') and ct.fecha=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=13)
+         group by ct.cliente
+       union all
+       select ct.cliente, 15, --'Mercado Internacional Opciones', 
+              sum(ct.valor_comercial*productos.fm_cambio('DO', ct.fecha)) -- 517.91
+         from gestion.cust_int ct, t t
+         where upper(ct.mercado)=upper('Option') and ct.fecha=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=15)
+         group by ct.cliente
+       union all
+       select ct.cliente, 18, --'Mercado Internacional Opciones', 
+              sum(ct.valor_comercial*productos.fm_cambio('DO', ct.fecha)) -- 517.91
+         from gestion.cust_int ct, t t
+         where upper(ct.mercado)=upper('ETF') and ct.fecha=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=18)
+         group by ct.cliente
+       union all
+       select c.cliente, 225, --'CAJA ADP DIVIDENDOS',
+              sum(saldo_disp)
+         from gestion.cus_sd_dia c, t t 
+         where c.fecha=t.fecha and cta_cli='CCTE' and
+               c.sec_IdCivil _cli=67 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=225)
+         group by c.cliente
+      union all       
+       select c.cliente, 226, --'CAJA ADP  fundamental',
+              sum(saldo_disp)
+         from gestion.cus_sd_dia c, t t 
+         where c.fecha=t.fecha and cta_cli='CCTE' and
+               c.sec_IdCivil _cli=77 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=226)
+         group by c.cliente
+       union all
+       select c.cliente, 227, --'CAJA ADP  Táctico ',
+              sum(saldo_disp)
+         from gestion.cus_sd_dia c, t t 
+         where c.fecha=t.fecha and cta_cli='CCTE' and
+               c.sec_IdCivil _cli=87 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=227)
+         group by c.cliente
+       union all
+       select c.cliente, 228, --'CAJA ADP  ASG ',
+              sum(saldo_disp)
+         from gestion.cus_sd_dia c, t t 
+         where c.fecha=t.fecha and cta_cli='CCTE' and
+               c.sec_IdCivil _cli=97 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=228)
+         group by c.cliente           
+       union all
+       select c.cliente, 229, --'CAJA ADP Estados Unidos ',
+              sum(saldo_disp)
+         from gestion.cus_sd_dia c, t t 
+         where c.fecha=t.fecha and cta_cli='CCTE' and
+               c.sec_IdCivil _cli=57 and c.IdCivil  not in (14456454, 96519800) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=229)
+         group by c.cliente  
+       ),
+    tx(cliente, producto, monto_tx, monto_tx_mon, ingreso, derechos, cant_tx, custodia_nula, cant_fact) as
+      (select pcl.cliente_base, 1, --'Acciones Nacionales', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 230, 283, 307) and m.sec_IdCivil <>99 and m.sec_IdCivil  not in (67, 77, 87, 97) and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and m.web=0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=1)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 185, --'Acciones Nacionales WEB', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 230, 283, 307) and m.sec_IdCivil <>99 and m.sec_IdCivil  not in (67, 77, 87, 97) and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and m.web=1 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=185)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 41, --'ADP', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307) and m.sec_IdCivil  = 67 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=41)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 41, --' facturas ADP sólo ingresos',
+              0.0, -- EL MONTO DE LA TRX ES cero ya que el valor es el ingreso
+              0.0, sum(f.monto_com), -- el monto_com es el ingreso de la factura sin iva
+              sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), -- ESTE DATO SIEMPRE ES CERO
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=1 and m.producto ='' and
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV = 214 and m.sec_IdCivil  = 67 and
+               m.fec_mvto=t.fecha and
+               m.tipo_comp_adj IN ('FD','FT') and m.comision = 0 and f.ind_liquid ='PH' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=41)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 42, --'Notas de Crédito ADP', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil  = 67 and m.tipo_comp_adj='ND' and
+               m.fec_mvto=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=42)
+         group by pcl.cliente_base         
+         
+       union all
+       select pcl.cliente_base, 200, --'ADP FUNDAMENTAL', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307) and m.sec_IdCivil  =77 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=200)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 200, --' facturas ADP FUNDAMENTAL sólo ingresos ADM FUN',
+              0.0, -- EL MONTO DE LA TRX ES cero ya que el valor es el ingreso
+              0.0, sum(f.monto_com), -- el monto_com es el ingreso de la factura sin iva
+              sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), -- ESTE DATO SIEMPRE ES CERO
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=1 and m.producto ='' and
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV = 214 and m.sec_IdCivil  =77 and
+               m.fec_mvto=t.fecha and
+               m.tipo_comp_adj IN ('FD','FT') and m.comision = 0 and f.ind_liquid ='PH' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=200)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 201, --'Notas de Crédito ADP FUNDAMENTAL', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil  = 77 and m.tipo_comp_adj='ND' and
+               m.fec_mvto=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=201)
+         group by pcl.cliente_base
+                  
+       union all
+       select pcl.cliente_base, 202, --'ADP TACTICO', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307) and m.sec_IdCivil  =87 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=202)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 202, --' facturas ADP TACTICO sólo ingresos ADP TAC',
+              0.0, -- EL MONTO DE LA TRX ES cero ya que el valor es el ingreso
+              0.0, sum(f.monto_com), -- el monto_com es el ingreso de la factura sin iva
+              sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), -- ESTE DATO SIEMPRE ES CERO
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=1 and m.producto ='' and
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV = 214 and m.sec_IdCivil  =87 and
+               m.fec_mvto=t.fecha and
+               m.tipo_comp_adj IN ('FD','FT') and m.comision = 0 and f.ind_liquid ='PH' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=202)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 203, --'Notas de Crédito ADP TACTICO', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil  = 87 and m.tipo_comp_adj='ND' and
+               m.fec_mvto=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=203)
+         group by pcl.cliente_base         
+         
+       union all
+       select pcl.cliente_base, 204, --'ADP ASG', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307) and m.sec_IdCivil  =97 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=204)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 204, --' facturas ADP ASG sólo ingresos ADP TAC',
+              0.0, -- EL MONTO DE LA TRX ES cero ya que el valor es el ingreso
+              0.0, sum(f.monto_com), -- el monto_com es el ingreso de la factura sin iva
+              sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), -- ESTE DATO SIEMPRE ES CERO
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=1 and m.producto ='' and
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV = 214 and m.sec_IdCivil  =97 and
+               m.fec_mvto=t.fecha and
+               m.tipo_comp_adj IN ('FD','FT') and m.comision = 0 and f.ind_liquid ='PH' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=204)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 205, --'Notas de Crédito ADP ASG', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil  = 97 and m.tipo_comp_adj='ND' and
+               m.fec_mvto=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=205)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 209, --'ADP EEUU', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=121 and m.producto in ('INAO') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (702, 975) and m.sec_IdCivil  =57 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and pcl.IdCivil  not in (14456454, 96519800) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=209)
+         group by pcl.cliente_base  
+       union all --Esto queda comentado hasta que galvaga pida reanudar logica
+       select pcl.cliente_base, 209, --' facturas ADP EEUU sólo ingresos', 
+              0.0, -- EL MONTO DE LA TRX ES cero ya que el valor es el ingreso
+              0.0, sum(f.monto_com), -- el monto_com es el ingreso de la factura sin iva
+              sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), -- ESTE DATO SIEMPRE ES CERO
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=1 and m.producto ='' and
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV = 214 and m.sec_IdCivil  = 57 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD','FT') and m.comision = 0 and f.ind_liquid ='PH' and pcl.IdCivil  not in (14456454, 96519800) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=209)
+         group by pcl.cliente_base  
+       --union all
+       --select pcl.cliente_base, 210, --'Notas de Crédito ADP EEUU', 
+       --       sum(coalesce(-m.monto, 0.0)),
+       --       0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+       --       count(*), 0.0, count(distinct f.folio)
+       --  from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+       --  where m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+       --        f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+       --        m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+       --        m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil  = 57 and m.tipo_comp_adj='ND' and
+       --        m.fec_mvto=t.fecha and pcl.IdCivil <>96667040 and
+       --        exists(select 1
+       --                 from prod prod
+       --                 where prod.clave=210)
+       --  group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 183, --'Gastos Acciones Nacionales', 
+              0.0, 0.0, sum(m.gastos) gasto, 0.0, 0, 0.0, 0
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.sec_IdCivil <>99 and m.TIPO_MOV in (223, 216) and 
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and m.gastos>0.0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=183)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 100, --'Notas de CrÃ©dito Acciones Nacionales', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC') and 
+               f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil  not in (67, 77, 87, 99, 97) and m.tipo_comp_adj='ND' and
+               m.fec_mvto=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=100)
+         group by pcl.cliente_base
+
+       union all
+       select pcl.cliente_base, 21, --'ETF Nacionales', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado in (122, 161) and m.producto in ('INEN', 'INET') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 230, 283, 307, 762, 768) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and m.web=0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=21)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 2, --'Facturas SimultÃ¡neas', 
+              sum(coalesce(case when m.monto>0.0 then m.monto else m.monto_aplazo end, 0.0)), 
+              --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, 
+              --sum(case when m.folio_comp_cont>0 then -m.comision else m.comision end), 
+              sum(m.comision), 
+              --sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              sum(m.derechos), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t  
+         where f.folio=m.folio_comp_adj and f.ind_simul='TS' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC', 'INTS') and 
+               m.unidad_des='CU' and --m.identific_docto in ('TS') and
+               m.ind_anulado='I' and m.TIPO_MOV in (307, 191) and m.sec_IdCivil <>99 and
+               m.tipo_comp_adj in ('FT', 'FD') and
+               m.fec_mvto=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=2)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 184, --'Gastos SimultÃ¡neas', 
+              0.0, 0.0, sum(m.gastos) gasto, 0.0, 0, 0.0, 0
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t  
+         where f.folio=m.folio_comp_adj and f.ind_simul='TS' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=2 and m.producto in ('INAC', 'ICAC', 'INTS') and 
+               m.unidad_des='TE' and --m.identific_docto in ('TS') and
+               m.ind_anulado='I' and m.TIPO_MOV in (223, 216) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FT', 'FD') and m.gastos>0.0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=184)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 14, --'Costo Fondo SimultÃ¡neas', 
+              sum(m.monto_aplazo)/avg(double(t.periodo_parcial)), 0.0, 
+              sum(m.monto_aplazo*(m.tasa-cf.tasa)/100.0/30.0/1.0),--double(days(m.fec_liquid) - days(m.fec_emi) + 1)
+              (null), (null), 0.0, (null)
+         from productos.p58_movimientos m
+              inner join t t on m.TIPO_MOV in (308, 192) and 
+                                m.fec_emi<=t.fecha and m.fec_liquid>=t.fecha and
+                                --t.fecha between m.fec_emi and m.fec_liquid and 
+                                m.producto in ('INAC', 'ICAC', 'INTS') and 
+                                m.unidad_des='CU' and m.mercado=2 and
+                                m.ind_anulado='I' and m.sec_IdCivil <>99
+              inner join gestion.linea_mercantil cf on cf.fecha=t.fecha and cf.tipo_linea=1 and 
+                                                       cf.estado=2 and t.fecha=date(cf.FECHA) and
+                                                       cf.direccion=-1
+              inner join productos.p58_clientes pcl on m.cliente=pcl.clave
+              inner join productos.p58_facturacion f on f.folio=m.folio_comp_adj and f.tipo_comp_fact=m.tipo_comp_adj and 
+                                                        f.ind_simul='TS'  and f.cliente=m.cliente 
+         where m.TIPO_MOV in (308, 192) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=14)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 101, --'Notas de CrÃ©dito SimultÃ¡neas', 
+              sum(case when m.tipo_comp_adj='ND' then -m.monto else 0.0 end), -- antes siemrpe cero
+              0.0, 
+              sum(case when m.tipo_comp_adj='ND' then -m.comision else -m.monto end),  0.0, count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t  
+         where f.folio=m.folio_comp_adj and f.ind_simul='TS' and m.producto in ('INAC', 'ICAC', 'INTS') and
+               m.cliente=pcl.clave and m.tipo_comp_adj in ('NT', 'ND') and m.unidad_des='CU' and 
+               m.ind_anulado='I' and m.sec_IdCivil <>99 and --m.tipo_mov_man=604 and m.concepto_mvto='RI' and 
+               m.fec_mvto=t.fecha and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=101)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 61, --'Facturas SimultÃ¡neas Financistas', 
+              0.0, 
+              --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, 
+              --sum(case when m.folio_comp_cont>0 then -m.comision else m.comision end), 
+              sum(sf.monto_comision), 
+              --sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              0.0, 
+              count(*), 0.0, 0
+         from tmp.simult_financista sf
+              inner join productos.p58_clientes pcl on pcl.IdCivil =int(substr(sf.IdCivil , 1, posstr(sf.IdCivil , '-')-1))
+              inner join t t on 1=1  
+         where sf.fecha_emision=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=61)
+         group by pcl.cliente_base
+       union all
+         --select pcl.cliente_base, 3, --'Renta Fija Nacional',
+         --       sum(coalesce(case when m.folio_comp_cont>0 then -(m.monto+(m.comision+m.gastos)*1.19)
+         --                         else m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+         --       0.0, sum(case when m.folio_comp_cont>0 then -m.comision else m.comision end), 
+         --       sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), count(*), 0.0
+         --  from productos.p58_movimientos m, productos.p58_clientes pcl, t t  
+         --  where m.cliente=pcl.clave and m.mercado=7 and m.producto in ('INRF') and 
+         --        m.unidad_des='TE' and m.ind_anulado='I' and m.sec_IdCivil <>99 and
+         --        year(m.fec_mvto)=t.ano and month(m.fec_mvto)=t.mes and m.tipo_comp_adj='FD'
+         --  group by pcl.cliente_base
+         --union all
+       select pcl.cliente_base, 3, --'Renta Fija Nacional', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), 0.0, 
+              count(*), 0.0, 0
+         from productos.p58_movimientos m, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=7 and m.producto in ('INRF') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (190, 306) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=3)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 102, --'Notas de Crédito Renta Fija Nacional', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), 0, 
+              count(*), 0.0, 0
+         from productos.p58_movimientos m, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=7 and m.producto in ('INRF') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (242, 261) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='ND' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=102)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 4, --'Intermediación Financiera',
+              sum(coalesce(m.monto_cap_comp, 0.0)), 0.0, sum(m.comision), sum(m.derechos), count(*), 0.0, 0
+         from productos.p58_movimientos m, productos.p58_clientes pcl, t t  
+         where m.cliente=pcl.clave and m.mercado=4 and m.producto in ('INIF') and 
+               m.unidad_des='CU' and m.ind_anulado='I' and m.sec_IdCivil <>99 and m.tipo_comp_adj='FD' and
+               m.fec_mvto=t.fecha and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=4)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 5, --'Pactos', 
+              null, null, 
+              sum(m.monto_capital/t.periodo_completo)*0.0001, 
+              null, count(*), 
+              sum(m.monto_capital/t.periodo_completo), 0
+         from productos.pac_saldos_mes m, productos.p58_clientes pcl, t t  
+         where m.cliente=pcl.clave and m.estado in ('T', 'E', 'A') and
+               m.ano=t.ano and m.mes=t.mes and m.fecha_inicial<=t.fecha and m.fecha_final>=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=5)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 6, --'Dolares BAC', 
+              sum(coalesce(do.monto_peso, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(((case when do.costo_transferencia=0.0 then 0.0 else do.costo_transferencia-do.precio_cierre end)
+                             *do.tipo_oper)*do.monto_dolar, 0.0)), (null), count(*), 0.0, 0
+         from productos.do_tx do, productos.do_clientes pcl, t t  
+         where do.cliente=pcl.clave and do.fecha=t.fecha and do.fecha<date('21/01/2013') and
+               ltrim(rtrim(upper(do.digitador))) not in ('JCORDERO', 'JCORDER', 'MWENSIOE', 
+                                                         'GKAUTZ', 'CMOMBER', 'MWENSIO', 'JHOFFMANN') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=6)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 6, --'Dolares SEBRA', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+               do.fecha=t.fecha and do.fecha between date('21/01/2013') and date('31/10/2015') and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '')<>'4' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=6)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 6, --'Dolares SEBRA', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+               do.fecha=t.fecha and do.fecha between date('01/11/2015') and date('31/12/2022') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '')<>'4' and 
+               ((coalesce(do.origen, '')<>'WS' and do.usuariocreador<>'WS') or 
+                (coalesce(do.origen, '')='WS' and do.usuariocreador='WS2' and upper(do.observaciones) not like 'OPERCANALWEB%')) and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=6)
+         group by pcl.cliente_base
+--       union all
+--       select pcl.cliente_base, 6, --'Dolares SEBRA', 
+--              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+--              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0
+--         from productos.mx_tx do, productos.do_clientes pcl, t t  
+--         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+--               do.fecha=t.fecha and do.fecha>=date('01/01/2023') and
+--               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+--               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+--               coalesce(do.cuenta_cliente, '')<>'4' and 
+--               ((coalesce(do.origen, '')<>'WS' and do.usu_origen<>'WS') or 
+--                (coalesce(do.origen, '')='WS' and do.usu_origen='WS2' and upper(do.observaciones) not like 'OPERCANALWEB%')) and
+--               exists(select 1
+--                        from prod prod
+--                        where prod.clave=6)
+--         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 6, --'Dolares SEBRA', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and 
+               do.fecha=t.fecha and do.fecha>=date('01/01/2023') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '')<>'4' and 
+               ((do.trading=0 and
+                ((coalesce(do.origen, '')<>'WS' and do.usu_origen<>'WS') or 
+                 (coalesce(do.origen, '')='WS'  and upper(do.observaciones) not like 'OPERCANALWEB%'))) or
+                (do.trading=1 and 
+                 (coalesce(do.origen, '')='WS' and do.usu_origen='WS2' and 
+                  upper(do.observaciones) not like 'SPOT CARGA MASIVA%' and upper(do.observaciones) not like 'OPERCANALWEB%'))) 
+               and do.agente is not null and do.mtorentabilidad > 0.0 and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=6)
+         group by pcl.cliente_base
+        union all 
+        select pcl.cliente_base, 6, --'Dolares REMESAS', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.mtorentabilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t 
+         where do.producto=3 and do.cliente=pcl.clave and 
+               do.fecha=t.fecha and do.fecha>=date('01/01/2023') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=6) 
+         group by pcl.cliente_base         
+       union all  
+       select pcl.cliente_base, 195, --'Dólares Tarjeta Débito para solo Cliente Banco', 
+              sum(coalesce(do.mtomonsecu, 0.0)), 
+              sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), 
+              (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+               do.fecha=t.fecha and do.fecha>=date('01/11/2015') and
+               (pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               coalesce(do.cuenta_cliente, '') ='5' and
+               exists(select 1
+                        from prod prod
+                       where prod.clave=195)
+         group by pcl.cliente_base
+       union all  
+       select pcl.cliente_base, 208, --'C/V Dólares Spot SF', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=1 and 
+               do.fecha=t.fecha and do.fecha>=date('01/01/2023') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               do.cuenta_cliente='0' and coalesce(do.origen, '')='WS' and upper(do.observaciones) like upper('%opercanalsf%') and
+               do.usu_origen in ('WS', 'WS2') and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=208)
+         group by pcl.cliente_base
+       --union all
+       --select pcl.cliente_base, 195, --'Dólares Tarjeta Débito para solo Cliente Banco', 
+       --       sum(coalesce(m.monto, 0.0)),
+       --       0.0, sum(round(((m.precio - m.tasa_age) * m.cantidad),0)) Ingreso 
+       --       , 0, 
+       --       count(*), 0.0
+       --  from productos.p58_movimientos m 
+       --       inner join productos.p58_clientes pcl on m.cliente=pcl.clave
+       --       inner join productos.p58_facturacion f on f.folio=m.folio_comp_adj 
+       --                                             and f.tipo_comp_fact=m.tipo_comp_adj  
+       --      , t t                                                                   
+       --  where m.mercado=5 and m.producto in ('MDOL') and 
+       --        m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+       --        m.ind_anulado='I' and m.TIPO_MOV = 174 and m.sec_IdCivil =5 and
+       --        m.fec_mvto= t.fecha and m.tipo_comp_adj='FX' and pcl.IdCivil  = 97006000 and f.monto_ven=0
+       --        and exists(select 1
+       --                 from prod prod
+       --                 where prod.clave=195)
+       --  group by pcl.cliente_base
+         union all
+         select pcl.cliente_base, 93, --'Dolares WEB Venta', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=1 and do.tipo_oper= -1 and
+               do.fecha=t.fecha and do.fecha between date('01/11/2015') and date('31/12/2022') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '')<>'4' and coalesce(do.origen, '')='WS' and upper(do.observaciones) like 'OPERCANALWEB%' and
+               do.usuariocreador in ('WS', 'WS2') and -- esto siemrpe es así para el caso
+               exists(select 1
+                        from prod prod
+                        where prod.clave=93)
+         group by pcl.cliente_base
+         union all
+         select pcl.cliente_base, 93, --'Dolares WEB Venta', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=1 and do.tipo_oper= -1 and
+               do.fecha=t.fecha and do.fecha>=date('01/01/2023') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '')<>'4' and coalesce(do.origen, '')='WS' and upper(do.observaciones) like 'OPERCANALWEB%' and
+               do.usu_origen in ('WS', 'WS2') and -- esto siemrpe es así para el caso
+               exists(select 1
+                        from prod prod
+                        where prod.clave=93)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 196, --'Dolares WEB Compra', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=1 and do.tipo_oper=1 and
+               do.fecha=t.fecha and do.fecha between date('01/11/2015') and date('31/12/2022') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               coalesce(do.cuenta_cliente, '')<>'4' and coalesce(do.origen, '')='WS' and upper(do.observaciones) like 'OPERCANALWEB%' and
+               do.usuariocreador in ('WS', 'WS2') and -- esto siemrpe es así para el caso
+               exists(select 1
+                        from prod prod
+                        where prod.clave=196)
+       group by pcl.cliente_base
+         union all
+         select pcl.cliente_base, 196, --'Dolares WEB Venta', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=1 and do.tipo_oper=1 and
+               do.fecha=t.fecha and do.fecha>=date('01/01/2023') and
+               not(pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '')<>'4' and coalesce(do.origen, '')='WS' and upper(do.observaciones) like 'OPERCANALWEB%' and
+               do.usu_origen in ('WS', 'WS2') and -- esto siemrpe es así para el caso
+               exists(select 1
+                        from prod prod
+                        where prod.clave=196)
+         group by pcl.cliente_base     
+       union all
+       select pcl.cliente_base, 20, --'Dolares SEBRA PAGADOS POR EL BANCO A TARJETAS DE CRÃ‰DITO', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+               do.fecha=t.fecha and do.fecha>=date('01/11/2015') and
+               (pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '') in ('0','1') and --not in ('4','2','5') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=20)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 31, --'Dolares SEBRA PAGADOS POR EL BANCO A TARJETAS DE CRÉDITO AUTOMATICAS', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+               do.fecha=t.fecha and do.fecha>=date('01/11/2015') and
+               (pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) like '%TRASPASO%DEUDA%TC%' and
+               do.cuenta_cliente='4' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=31)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 197, --'Notas de Credito - Dolares SEBRA PAGADOS POR EL BANCO A TARJETAS DE CRÃ‰DITO'', 
+              sum(coalesce(-m.monto, 0.0)),
+              0.0, sum(-m.comision), 0, 
+              count(*), 0.0, 0
+         from productos.p58_movimientos m, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.mercado=5 and m.producto in ('MDOL') and 
+               m.unidad_des='TE' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV = 168 and m.sec_IdCivil =0 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='NT' 
+               and pcl.IdCivil =97006000 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=197)
+         group by pcl.cliente_base  
+       union all
+       ----  *********************************
+       ----  trx dolares solo cuentas mach
+       ----  *********************************
+       select pcl.cliente_base, 90, --'Dolares SEBRA PAGADOS POR EL BANCO A TARJETAS DE CRÃ‰DITO', 
+              sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+              sum(coalesce(do.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx do, productos.do_clientes pcl, t t  
+         where do.producto=1 and do.cliente=pcl.clave and do.trading=0 and
+               do.fecha=t.fecha and do.fecha>=date('01/11/2015') and
+               (pcl.IdCivil =97006000 and do.utilidad>0.0 and do.internet_limite is null) and
+               --upper(do.observaciones) not like '%TRASPASO%DEUDA%TC%' and
+               coalesce(do.cuenta_cliente, '') ='2' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=90)
+         group by pcl.cliente_base
+         union all
+       --select pcl.cliente_base, 117, --'REMESAS Dolares SEBRA', 
+       --       sum(coalesce(do.mtomonsecu, 0.0)), sum(coalesce(do.monto_dolar, 0.0)), 
+       --       sum(coalesce(do.total_comision, 0.0)), (null), count(*), 0.0
+       --  from productos.mx_tx do, productos.do_clientes pcl, t t  
+       --  where do.producto=3 and do.cliente=pcl.clave and do.trading=0 and
+       --        do.fecha=t.fecha and do.fecha>=date('21/01/2013') and
+       --        exists(select 1
+       --                 from prod prod
+       --                 where prod.clave=117)
+       --  group by pcl.cliente_base
+       --union all                          
+       select pcl.cliente_base, 7, --'Euros ROLANDO', 
+              sum(case when m.tipo_operacion='EURO/$' then m.nominales*spot_cliente
+                       when m.tipo_operacion='$/EURO' then m.nominales*spot_cliente
+                       when m.tipo_operacion='EURO/U$' then m.nominales*spot_cliente*m.paridad
+                       when m.tipo_operacion='U$/EURO' then m.nominales*spot_cliente*m.paridad
+                       else 0.0 end), 
+              sum(m.nominales), sum(coalesce(m.utilidad_distribucion, 0.0)), (null), count(*), 0.0, 0
+         from productos.EU_tx m, productos.eu_clientes pcl, t t  
+         where m.cliente=pcl.clave and m.fecha_operacion=t.fecha and 
+               m.fecha_operacion<date('21/01/2013') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=7)
+         group by pcl.cliente_base
+       union all                          
+       select pcl.cliente_base, 7, --'Euros SEBRA', 
+              sum(case when m.moneda_sec=999 then m.mtomonsecu
+                       when m.moneda_sec=13  then m.monto_dolar*
+                                                  case when m.tipo_oper=1 then m.tcrefcompra
+                                                       else m.tcrefventa end
+                       else 0.0 end), 
+              sum(m.mtomonprinc), 
+              sum(coalesce(m.utilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx m, productos.do_clientes pcl, t t  
+         where m.producto=2 and m.cliente=pcl.clave and m.fecha=t.fecha and m.fecha>=date('21/01/2013') and 
+               m.trading=0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=7)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 7, --'Euros REMESAS', 
+              sum(case when m.moneda_sec=999 then m.mtomonsecu
+                       when m.moneda_sec=13  then m.monto_dolar*
+                                                  case when m.tipo_oper=1 then m.tcrefcompra
+                                                       else m.tcrefventa end
+                       else 0.0 end), 
+              sum(m.mtomonprinc), 
+              sum(coalesce(m.mtorentabilidad, 0.0)), (null), count(*), 0.0, 0
+         from productos.mx_tx m, productos.do_clientes pcl, t t
+         where m.producto=4 and m.cliente=pcl.clave and  
+               m.fecha=t.fecha and m.fecha>=date('01/01/2023') and 
+               m.trading=0
+         group by pcl.cliente_base
+       union all       
+       --select pcl.cliente_base, 123, --'REMESAS EUROS SEBRA', 
+       --       sum(case when m.moneda_sec=999 then m.mtomonsecu
+       --                when m.moneda_sec=13  then m.monto_dolar*
+       --                                           case when m.tipo_oper=1 then m.tcrefcompra
+       --                                                else m.tcrefventa end
+       --                else 0.0 end), 
+       --       sum(m.mtomonprinc),  
+       --       sum(coalesce(m.total_comision, 0.0)), (null), count(*), 0.0
+       --  from productos.mx_tx m, productos.do_clientes pcl, t t  
+       --  where m.producto=4 and m.cliente=pcl.clave and m.trading=0 and m.fecha=t.fecha and 
+       --        m.fecha>=date('21/01/2013') and
+       --        exists(select 1
+       --                 from prod prod
+       --                 where prod.clave=123)
+       --  group by pcl.cliente_base
+       --union all
+       select pcl.cliente_base, 8, --'Forward', 
+              sum(m.nominales*m.precio_pactado*case when m.tipo_fwd in ('EUR/U$', 'U$/EUR') then m.paridad else 1.0 end),
+              null, sum(m.nominales*((m.precio_pactado-m.spot_traiding-m.ptos_fwd_trading)*
+                        case when m.tipo_oper=1 then -1.0 else 1.0 end)*
+                        case when m.tipo_fwd in ('EUR/U$', 'U$/EUR') then m.paridad else 1.0 end*
+                        case when coalesce(inst.ex, 0)=1 then 0.0 else 1.0 end), 
+              (null), count(*), 0.0, 0
+         from productos.fw_tx m
+              inner join productos.p58_clientes pcl on pcl.clave=m.cliente 
+              inner join t t on m.fecha_contrato=t.fecha
+              left join lateral (select 1
+                                   from base.clientes cl 
+                                   where cl.IdCivil =pcl.IdCivil  and cl.cli_fwd_mmaker=1) as inst(ex) on 1=1
+         where m.estado=1 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=8)
+         group by pcl.cliente_base, pcl.IdCivil 
+       union all
+       select pcl.cliente_base, 19, --'Forward Anticipado, la parte que cobra por anticipar el FW', 
+              sum(m.nominales*m.precio_liquidacion*case when m.tipo_fwd in ('EUR/U$', 'U$/EUR') then m.paridad else 1.0 end),
+              null, 
+              coalesce(sum(case when m.tipo_oper=1 then 1.0 else -1.0 end*
+                                       case when m.fecha_anticipo is not null and precios.dist>0.0 then (precios.dist-precios.trading)*m.nominales*
+                                                                                                                                                  case when m.tipo_fwd in ('EUR/U$', 'U$/EUR') then m.paridad else 1.0 end else 0.0 end), 0.0), 
+              (null), count(*), 0.0, 0
+         from productos.fw_tx m, productos.p58_clientes pcl, t t  
+                  left join lateral(select tf.costoanticipo, tf.costotrading
+                                             from tmp.sebra_fwd_costo_ant tf
+                                             where tf.foliooperacion=m.nro_contrato) as precios(dist, trading) on 1=1
+         where m.cliente=pcl.clave and m.estado=1 and m.fecha_anticipo is not null and min(m.fecha_anticipo, m.fecha_vencimiento)=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=8)
+         group by pcl.cliente_base
+       union all
+       -- coalesce(sum(case when ft.tipo_oper=1 then 1.0 else -1.0 end*case when ft.fecha_anticipo is not null and precios.dist>0.0 then (ft.precio_liquidacion-precios.dist)*ft.nominales else 0.0 end), 0.0)
+       select pcl.cliente_base, 10, --'Mercado Internacional Renta Variable', 
+              sum(coalesce(m.precio*m.cantidad*m.cambio, 0.0)), sum(m.cantidad), sum(coalesce(m.ingreso, 0.0)), 
+              double(0.0), count(*), 0.0, 0
+         from productos.Pershing_tx m, productos.p58_clientes pcl, t t  
+         where m.cliente=pcl.clave and m.fecha_ejecucion=t.fecha and
+               upper(substr(m.status, 1, 3))='EXE' and m.tipo_instrumento='ACCIÓN' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=10)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 11, --'Mercado Internacional Renta Fija', 
+              sum(coalesce(m.precio*m.cantidad*m.cambio, 0.0)), sum(m.cantidad), sum(coalesce(m.ingreso, 0.0)), 
+              (null), count(*), 0.0, 0
+         from productos.Pershing_tx m, productos.p58_clientes pcl, t t  
+         where m.cliente=pcl.clave and m.fecha_ejecucion=t.fecha and
+               upper(substr(m.status, 1, 3))='EXE' and m.tipo_instrumento='BONO' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=11)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 12, --'Mercado Internacional FFMM', 
+              sum(coalesce(m.precio*m.cantidad*m.cambio, 0.0)), sum(m.cantidad),  
+              sum(coalesce(m.ingreso, 0.0)), (null), count(*), 0.0, 0
+         from productos.Pershing_tx m, productos.p58_clientes pcl, t t  
+         where m.cliente=pcl.clave and m.fecha_ejecucion=t.fecha and
+               upper(substr(m.status, 1, 3))='EXE' and m.tipo_instrumento='FONDO MUTUO' and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=12)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 15, --'Mercado Internacional Optiones', 
+              sum(coalesce(m.precio*m.cantidad*m.cambio, 0.0)), sum(m.cantidad),  
+              sum(coalesce(m.ingreso, 0.0)), double(0.0), count(*), 0.0, 0
+         from productos.Pershing_tx m, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.fecha_ejecucion=t.fecha and
+               upper(substr(m.status, 1, 3))='EXE' and m.tipo_instrumento in ('OPCION', 'OPCIÓN') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=15)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 16, --'Mercado Internacional Notas Estructuradas', 
+              sum(coalesce(m.precio*m.cantidad*m.cambio, 0.0)), sum(m.cantidad),  
+              sum(coalesce(m.ingreso, 0.0)), double(0.0), count(*), 0.0, 0
+         from productos.Pershing_tx m, productos.p58_clientes pcl, t t 
+         where m.cliente=pcl.clave and m.fecha_ejecucion=t.fecha and
+               upper(substr(m.status, 1, 3))='EXE' and 
+               m.tipo_instrumento in ('NOTA ESCTRUCTURADA', 'NOTA ESTRUCTURADA') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=16)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 92, -- NC Contratos Market Maker
+              0.0, 0.0,
+              sum(-(f.monto_com+f.monto_ven)),
+              0.0, count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos tx, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.cliente=pcl.clave and tx.est_movto='T' and ltrim(rtrim(f.producto))='' and tx.ind_anulado='I' and
+               f.ind_simul='' and tx.tipo_comp_adj = 'NT' and f.cliente=tx.cliente and
+               tx.folio_comp_adj=f.folio and f.tipo_comp_fact=tx.tipo_comp_adj and
+               f.fecha_ingreso=t.fecha and tx.tipo_mov_man=584 and tx.tipo_mov=240 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=92)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, ie.producto, --'Otros Ingresos, generalemte BCI SECURITIES', Por ejemplo se carga el producto 11
+              sum(coalesce(ie.ingreso, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(ie.ingreso), double(0.0), 
+              count(*), 0.0, 0
+         from gestion.ingresos_externos ie, productos.p58_clientes pcl, t t 
+         where ie.cliente=pcl.cliente_base and ie.fecha=t.fecha and ie.estado=1 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=ie.producto)
+         group by pcl.cliente_base, ie.producto
+       union all  
+       select pcl.cliente_base, 161, --'Internacional BCS', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=121 and m.producto in ('INAO') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (216, 223, 702, 975, 191) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and m.web=0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=161)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 162, --'N/C Internacional BCS', 
+              sum(coalesce(-m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=121 and m.producto in ('INAO') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('ND', 'NT') and m.web=0 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=162)
+         group by pcl.cliente_base
+       union all  
+       select pcl.cliente_base, 170, --'C/V CFI', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=3 and m.producto in ('INCF', 'INCO', 'INCM') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307, 881) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=170)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 171, --'N/C CFI', 
+              sum(coalesce(-m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=3 and m.producto in ('INCF', 'INCO', 'INCM') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243, 262) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('ND', 'NT') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=171)
+         group by pcl.cliente_base
+       union all  
+       select pcl.cliente_base, 181, --'SIMULTANEAS CFI', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='TS' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=3 and m.producto in ('INCF', 'INCO', 'INCM') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307, 881) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=181)
+         group by pcl.cliente_base
+       union all          
+       select pcl.cliente_base, 191, --'SIMULTANEAS CFM', 
+              sum(coalesce(m.monto, 0.0)),
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and f.ind_simul='TS' and m.mercado=201 and m.producto ='INCM' and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and m.ind_anulado='I' and
+               m.tipo_mov in (223,307) and m.sec_IdCivil <>99 and m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and
+               exists(select 1 
+                        from prod prod
+                        where prod.clave=191)
+         group by pcl.cliente_base
+       union all               
+       select pcl.cliente_base, 192, --'Moneda de Oro NONERO', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=5 and m.producto in ('INMO') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 307) and m.sec_IdCivil <>99 and m.sec_IdCivil  not in (67, 77, 87) and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and 
+               exists(select 1
+                        from prod prod
+                        where prod.clave=192)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 110, -- facturas manuales no definidas
+              0.0, 0.0, 
+              sum(case f.tipo_comp_fact when 'FT' then (f.monto_com+f.monto_ven) else -(f.monto_com+f.monto_ven) end), 
+              0.0, count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos tx, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.cliente=pcl.clave and tx.est_movto='T' and ltrim(rtrim(f.producto))='' and tx.ind_anulado='I' and
+               f.ind_simul='' and tx.folio_comp_adj=f.folio and f.tipo_comp_fact in ('FT', 'NT') and 
+               f.cliente=tx.cliente and
+               tx.tipo_mov_man is null and tx.tipo_comp_adj in ('FT', 'NT') and f.fecha_ingreso=t.fecha and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=110)
+         group by pcl.cliente_base
+       union all                        
+       select pcl.cliente_base, tm.producto, -- facturas manuales segun producto, 
+                                             --   exluyendo producto 114 (corrección internac)
+              0.0, 0.0, 
+              sum(case f.tipo_comp_fact when 'FT' then (f.monto_com+f.monto_ven) 
+                    else -(f.monto_com+f.monto_ven) end*
+                  case tm.producto when 121 then -1
+                                   when 118 then -1 
+                                   else 1 end), 
+              0.0, count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos tx, productos.p58_facturacion f, 
+              productos.p58_clientes pcl, productos.P58_TIPOS_MVTO tm, t t 
+         where f.cliente=pcl.clave and tx.est_movto='T' and ltrim(rtrim(f.producto))='' and tx.ind_anulado='I' and 
+               f.ind_simul='' and tx.tipo_comp_adj in ('FT', 'NT') and f.cliente=tx.cliente and
+               --not(tx.tipo_mov_man=604) and -- excluir comisiones N/C Simultaneas
+               tx.folio_comp_adj=f.folio and f.tipo_comp_fact in ('FT', 'NT') and tx.tipo_mov_man is not null and 
+               f.folio not in (94815, 94816, 94817) and
+               tx.tipo_mov_man=tm.clave and f.fecha_ingreso=t.fecha and tm.producto<>114 and
+               tx.tipo_mov_man<>592 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=tm.producto)
+         group by pcl.cliente_base, tm.producto, t.fecha, pcl.clave
+       union all    
+       -- correcciÃ³n de las facturas manuales de Internacional (pershing) descontando
+       -- lo original de pershing, sirve como correcciÃ³n, se descuentan las remesas de
+       -- 20.000 y 25.000 y sus mÃºltiplos
+       -- se hace sÃ³lo si es el Ãºltimo dÃ­a del mes
+       -- sÃ³lo Ãºltimo dÃ­a calendario del mes, se hace todo el mes
+       select coalesce(contab.cliente_base, persh.cliente_base), 114, 0.0, 0.0, 
+              coalesce(contab.ingreso, 0.0)-coalesce(persh.ingreso, 0.0), 0.0, 
+              coalesce(contab.cant_tx, 0.0)+coalesce(persh.cant_tx, 0.0), 0.0, 0
+         from table(select pcl.cliente_base, 
+                           sum((f.monto_com+f.monto_ven)*case f.tipo_comp_fact when 'FT' then 1.0 else -1.0 end), count(*)
+                      from productos.p58_movimientos tx, productos.p58_facturacion f, 
+                           productos.p58_clientes pcl, productos.P58_TIPOS_MVTO tm, t t 
+                      where --t.fecha=t.fecha_fin_mes_calendario and 
+                            tm.producto=114 and
+                            f.cliente=pcl.clave and tx.est_movto='T' and ltrim(rtrim(f.producto))='' and 
+                            tx.ind_anulado='I' and f.ind_simul='' and tx.tipo_comp_adj in ('FT', 'NT') and 
+                            tx.folio_comp_adj=f.folio and f.tipo_comp_fact in ('FT', 'NT') and f.cliente=tx.cliente and
+                            tx.tipo_mov_man is not null and tx.tipo_mov_man=tm.clave and 
+                            f.fecha_ingreso=t.fecha and --year(f.fecha_ingreso)=t.ano and month(f.fecha_ingreso)=t.mes and
+                            not(tm.clave=571 and f.monto_com>0 and 
+                                (double(integer(f.monto_com/double(20000)))=f.monto_com/double(20000) or
+                                double(integer(f.monto_com/double(25000)))=f.monto_com/double(25000))) and
+                            exists(select 1
+                                     from prod prod
+                                     where prod.clave=tm.producto)
+                      group by pcl.cliente_base) as contab(cliente_base, ingreso, cant_tx) 
+              full outer join
+              table(select pcl.cliente_base, sum(coalesce(m.ingreso, 0.0)), count(*)
+                      from productos.Pershing_tx m, productos.p58_clientes pcl, t t 
+                      where m.cliente=pcl.clave and --t.fecha=t.fecha_fin_mes_calendario and 
+                            m.fecha_ejecucion=t.fecha and -- year(m.fecha_ejecucion)=t.ano and month(m.fecha_ejecucion)=t.mes and
+                            upper(substr(m.status, 1, 3))='EXE' and 
+                            m.tipo_instrumento in ('ACCIÓN', 'BONO', 'FONDO MUTUO', 
+                                                   'OPCION', 'OPCIÓN', 
+                                                   'NOTA ESCTRUCTURADA', 'NOTA ESTRUCTURADA') and
+                            exists(select 1
+                                     from prod prod
+                                     where prod.clave=114)
+                      group by pcl.cliente_base)
+                as persh(cliente_base, ingreso, cant_tx) on contab.cliente_base=persh.cliente_base, t t1
+         --where t1.fecha=t1.fecha_fin_mes_calendario
+         --union all                        
+         --select pcl.cliente_base, 117, -- facturas manuales de remesas internacionales
+         --       0.0, 0.0, 
+         --       sum(case f.tipo_comp_fact when 'FT' then (f.monto_com+f.monto_ven) else -(f.monto_com+f.monto_ven) end), 
+         --       0.0, count(*), 0.0
+         --  from productos.p58_movimientos tx, productos.p58_facturacion f, 
+         --       productos.p58_clientes pcl, productos.P58_TIPOS_MVTO tm, t t 
+         --  where f.cliente=pcl.clave and tx.est_movto='T' and ltrim(rtrim(f.producto))='' and tx.ind_anulado='I' and
+         --        tx.folio_comp_adj=f.folio and f.tipo_comp_fact in ('FT', 'NT') and tx.tipo_mov_man is not null and 
+         --        tx.tipo_mov_man=tm.clave and year(f.fecha_ingreso)=t.ano and month(f.fecha_ingreso)=t.mes and
+         --        (tm.clave=571 and f.monto_com>0 and double(integer(f.monto_com/double(x_remesa)))=f.monto_com/double(x_remesa)) -- identificacin de remesas al extranjero
+         --  group by pcl.cliente_base, tm.producto
+         --union all
+         --select cl.clave, 17, --'FFMM Remuneracion', 
+         --       sum(coalesce(s.patr_prom_p, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+         --       0.0, sum(s.remun_p), 0, count(*), 0.0
+         --  from ffmm.sum_cli_salmes s, ffmm.clientes fcl, base.clientes cl, t t 
+         --  where s.cliente=fcl.clave and fcl.IdCivil =cl.IdCivil  and 
+         --        s.ano=t.ano and s.mes=t.mes
+         --  group by cl.clave
+        union all          
+       select pcl.cliente_base, 198, --'CFM', 
+              sum(coalesce(m.monto, 0.0)),
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+         where f.folio=m.folio_comp_adj and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and f.ind_simul='' and m.mercado=201 and m.producto ='INCM' and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and m.ind_anulado='I' and
+               m.tipo_mov in (191) and m.sec_IdCivil <>99 and m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and
+               exists(select 1 
+                        from prod prod
+                        where prod.clave=198)
+         group by pcl.cliente_base
+         union all
+         select pcl.cliente_base cliente, 207 producto, --'COMISION ALLFUNDS ', 
+                sum(coalesce(m.monto, 0.0)) monto_tx, 
+                0.0 monto_tx_mon, sum(m.comision) ingresos, 
+                sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end) derechos, 
+                count(*) cant_tx, 0.0 custodia_nula, count(distinct f.folio) cant_fact
+           from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t
+           where f.cliente=pcl.clave and m.est_movto='T' and ltrim(rtrim(f.producto))='' and m.ind_anulado='I' and
+                 f.ind_simul='' and m.tipo_comp_adj = 'FT' and f.cliente=m.cliente and
+                 m.folio_comp_adj=f.folio and f.tipo_comp_fact=m.tipo_comp_adj and m.sec_IdCivil =81 and 
+                 f.fecha_ingreso=t.fecha and 
+                 m.tipo_mov_man=3138 and m.tipo_mov=214 and
+                 exists(select 1
+                          from prod prod
+                          where prod.clave=207)
+           group by pcl.cliente_base
+         union all
+         select pcl.cliente_base, 141, --'ETF WEB', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado in (122, 161) and m.producto in ('INEN', 'INET') and 
+               m.unidad_des='CU' and (length(ltrim(rtrim(m.identific_docto)))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (191, 230, 283, 307, 762, 768) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj='FD' and m.web=1 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=141)
+         group by pcl.cliente_base
+       union all  
+       select pcl.cliente_base, 142, --'Internacional BCS WEB', 
+              sum(coalesce(m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=121 and m.producto in ('INAO') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (216, 223, 702, 975, 191) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('FD', 'FT') and m.web=1 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=142)
+         group by pcl.cliente_base
+       union all
+       select pcl.cliente_base, 143, --'N/C Internacional BCS WEB', 
+              sum(coalesce(-m.monto, 0.0)), --m.monto+(m.comision+m.gastos)*1.19 end, 0.0)), 
+              0.0, sum(-m.comision), sum(case when m.folio_comp_cont>0 then -m.derechos else m.derechos end), 
+              count(*), 0.0, count(distinct f.folio)
+         from productos.p58_movimientos m, productos.p58_facturacion f, productos.p58_clientes pcl, t t 
+         where f.folio=m.folio_comp_adj and f.ind_simul='' and f.tipo_comp_fact=m.tipo_comp_adj and 
+               f.cliente=m.cliente and
+               m.cliente=pcl.clave and m.mercado=121 and m.producto in ('INAO') and 
+               m.unidad_des='CU' and (length(trim(m.identific_docto))=0 or m.identific_docto is null) and
+               m.ind_anulado='I' and m.TIPO_MOV in (243) and m.sec_IdCivil <>99 and
+               m.fec_mvto=t.fecha and m.tipo_comp_adj in ('ND', 'NT') and m.web=1 and
+               exists(select 1
+                        from prod prod
+                        where prod.clave=143)
+         group by pcl.cliente_base),
+      tx_cus(cliente, producto, monto_tx, monto_tx_mon, ingreso, derechos, cant_tx, custodia, cant_fact) as
+        (select coalesce(tx.cliente, cust.cliente), coalesce(tx.producto, cust.producto),
+                sum(tx.monto_tx), sum(tx.monto_tx_mon), sum(tx.ingreso), 
+                sum(tx.derechos), sum(tx.cant_tx), sum(cust.custodia), sum(tx.cant_fact)
+           from tx tx full outer join cust cust on tx.cliente=cust.cliente and tx.producto=cust.producto
+           group by coalesce(tx.cliente, cust.cliente), coalesce(tx.producto, cust.producto)),
+      r(cliente, IdCivil , origen, ejecutivo, sucursal, regional, canal, gerencia) as 
+        (select cl.clave, cl.IdCivil , cl.bp, reas.eje, reas.suc, reas.reg, reas.can, reas.ger
+           from base.clientes cl, t t, 
+                table(base.reasig_fecha(base.cli_ult_eje(cl.clave, 0, t.fecha), t.fecha)) 
+                  as reas(eje, suc, reg, can, ger)
+           where cl.clave in (select cu.cliente from cust cu union all select tx.cliente from tx))-- and g.clave=x_can.gerencia)
+    select cl.origen, t.ano, t.mes, t.fecha,
+           cl.cliente, cl.ejecutivo, cl.sucursal, cl.regional, cl.canal, cl.gerencia,
+           prod.clave, prod.orden,  
+           bigint(coalesce(tc.monto_tx, 0.0)), 
+           bigint(coalesce(tc.monto_tx_mon, 0.0)), 
+           bigint(coalesce(tc.ingreso, 0.0)), 
+           bigint(coalesce(tc.derechos, 0.0)), 
+           bigint(coalesce(tc.custodia, 0.0)), 
+           bigint(coalesce(tc.cant_tx, 0.0)), 
+           bigint(coalesce(tc.cant_fact, 0.0))
+      from tx_cus tc, r cl, t t, prod prod
+      where tc.cliente=cl.cliente and tc.producto=prod.clave and 
+            (tc.ingreso<>0.0 or tc.derechos<>0.0 or tc.monto_tx<>0.0 or tc.cant_tx<>0.0 or tc.custodia<>0.0)
+    with ur;
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD ITER FIN (Insertados)', 14, (select count(*)
+                                                      from gestion.IdCivil _prod_dia rpd
+                                                      where rpd.fecha=x_fecha), char(x_fecha), 0.0);
+  commit;
+  if x_fecha=x_hoy then
+    leave iteracion;
+  end if;
+  set x_fecha=x_fecha+1 days;
+  set x_iter=x_iter+1;
+end loop Iteracion;
+commit;
+call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 ITER FINALIZA', 20, 0, '', 0.0);
+commit;
+if x_fecha_ini<productos.join_fecha(1, 2, 2013) then
+   -- carga GARPIN de Enero para cuadrar
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 UPDATE GARPIN INI', 30, 0, ' CANTIDAD DOLARES gestion.mx_enero2013',
+                       double((select count(*)
+                                from gestion.mx_enero2013 e
+                                where e.producto=1)));
+  commit;
+   update gestion.IdCivil _prod_dia rp
+     set rp.ingresos=coalesce(bigint((select coalesce(double(e.ingreso), 0.0)
+                                        from gestion.mx_enero2013 e, base.clientes cl
+                                        where cl.clave=rp.cliente and e.producto=1 and
+                                              cl.IdCivil =e.IdCivil  and e.fecha=rp.fecha)), 0)
+     where rp.ano=2013 and rp.mes=1 and rp.producto=6 and rp.fecha between date('01/01/2013') and date('19/01/2013');
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 UPDATE GARPIN FIN DÓLARES', 31, 0, ' CANTIDAD EUROS gestion.mx_enero2013', 
+                       double((select count(*)
+                                from gestion.mx_enero2013 e
+                                where e.producto=2)));
+  commit;
+   update gestion.IdCivil _prod_dia rp
+     set rp.ingresos=coalesce(bigint((select coalesce(double(e.ingreso), 0.0)
+                                        from gestion.mx_enero2013 e, base.clientes cl
+                                        where cl.clave=rp.cliente and e.producto=2 and
+                                              cl.IdCivil =e.IdCivil  and e.fecha=rp.fecha)), 0)
+     where rp.ano=2013 and rp.mes=1 and rp.producto=7 and rp.fecha between date('01/01/2013') and date('19/01/2013');
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 UPDATE GARPIN FIN EUROS', 32, 0, '', 0.0);
+  commit;
+end if;
+commit;
+-- hacer carga de GESTION.IdCivil _PROD (tabla mensual)
+call ADMIN.LOG_GCB(120, 'IdCivil _PROD CLI PARA CARGAR DESDE', 40, 0, 
+                     ltrim(rtrim(char(productos.join_fecha(1, month(x_fecha_ini), year(x_fecha_ini))))), 0.0);
+commit;
+set x_ano=year(x_fecha_ini);
+set x_mes=month(x_fecha_ini);
+set x_fin=0;
+iterar_mes: loop
+  if x_ano=year(x_fecha) and x_mes=month(x_fecha) then -- ultimo mes cargado es el de la x_fecha
+    set x_fin=1;
+  end if;
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 ITER MES', 50, 0, char(x_fecha_ini), 0.0);
+  commit;
+  set x_fecha_fin=productos.join_fecha(1, x_mes, x_ano)+1 month-1 day;
+  if x_fecha_fin>x_hoy then
+    set x_fecha_fin=x_hoy;
+    set x_fin=1;
+  end if;
+  delete from gestion.IdCivil _prod rp
+    where rp.ano=x_ano and rp.mes=x_mes;
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 ITER MES BORRADO (x_fecha_fin)', 51, 0, char(x_fecha_fin), 0.0);
+  commit;
+  set x_num_cust_rv=coalesce((select count(*)
+                                from gestion.estado_cust ec
+                                where ec.producto=1 and year(ec.fecha)=x_ano and month(ec.fecha)=x_mes), 0);
+  set x_num_cust_rf=coalesce((select count(*)
+                                from gestion.estado_cust ec
+                                where ec.producto=2 and year(ec.fecha)=x_ano and month(ec.fecha)=x_mes), 0);
+  set x_num_cust_if=coalesce((select count(*)
+                                from gestion.estado_cust ec
+                                where ec.producto=3 and year(ec.fecha)=x_ano and month(ec.fecha)=x_mes), 0);
+  INSERT INTO gestion.IdCivil _prod(ORIGEN, ANO, MES, FECHA, CL_CLIENTE, 
+                               CL_EJE, CL_SUC, CL_REG, CL_CAN, CL_GER,
+                               CL_PRODUCTO, ORDEN, 
+                               MONTO_TX, MONTO_TX_MON, INGRESOS, DERECHOS, CUSTODIA, cant_tx, cant_fact)
+    with
+      tot(ORIGEN, ANO, MES, FECHA, CLIENTE, PRODUCTO, ORDEN, 
+          MONTO_TX, MONTO_TX_MON, INGRESOS, DERECHOS, CUSTODIA, cant_tx, cant_fact) as
+        (select rpd.ORIGEN, rpd.ANO, rpd.MES, max(rpd.FECHA), rpd.CLIENTE, rpd.PRODUCTO, rpd.ORDEN, 
+                sum(rpd.MONTO_TX), sum(rpd.MONTO_TX_MON), 
+                sum(rpd.INGRESOS), sum(rpd.DERECHOS), 
+                case when rpd.producto in (1, 2) then case when x_num_cust_rv=0 then 0.0 else bigint(double(sum(rpd.CUSTODIA))/double(x_num_cust_rv)) end
+                     when rpd.producto in (3) then case when x_num_cust_rf=0 then 0.0 else bigint(double(sum(rpd.CUSTODIA))/double(x_num_cust_rf)) end
+                     when rpd.producto in (4) then case when x_num_cust_if=0 then 0.0 else bigint(double(sum(rpd.CUSTODIA))/double(x_num_cust_if)) end
+                     when rpd.producto in (10, 11, 12, 13, 15) then bigint(sum(rpd.custodia)) -- peshing no hay promedio, solo posicion ultimo dia
+                     when rpd.producto in (41,200,202,204,225,226,227,228,229) then bigint(double(sum(rpd.CUSTODIA))/double(day(x_fecha_fin))) -- adp sin NC
+                     else case when day(x_fecha_fin)=0 then 0.0 else bigint(double(sum(rpd.CUSTODIA))/double(day(x_fecha_fin))) end end, 
+                sum(rpd.cant_tx), sum(rpd.cant_fact) 
+           from gestion.IdCivil _prod_dia rpd
+           where rpd.ano=x_ano and rpd.mes=x_mes
+           group by rpd.ORIGEN, rpd.ANO, rpd.MES, rpd.CLIENTE, rpd.PRODUCTO, rpd.ORDEN)
+      select t.ORIGEN, t.ANO, t.MES, x_fecha_fin, t.CLIENTE, 
+             l.eje, l.suc, l.reg, l.can, l.ger,
+             t.PRODUCTO, t.ORDEN, 
+             t.MONTO_TX, t.MONTO_TX_MON, 
+             t.INGRESOS, t.DERECHOS, t.CUSTODIA, t.cant_tx, t.cant_fact
+        from tot t,
+             lateral(select y.eje, y.suc, y.reg, y.can, y.ger
+                       from table(base.reasig_fecha(base.cli_ult_eje(t.cliente, 0, x_fecha_fin), x_fecha_fin)) 
+                              as y(eje, suc, reg, can, ger)) 
+               as l(eje, suc, reg, can, ger)
+        where 1=1;
+  commit;
+  update gestion.IdCivil _prod rp 
+    set rp.custodia_final=(select sum(coalesce(rpd.custodia, 0))
+                             from gestion.IdCivil _prod r
+                                   left join gestion.IdCivil _prod_dia rpd on rpd.ORIGEN=rp.origen and rpd.ANO=rp.ano and rpd.MES=rp.mes and
+                                                                         rpd.CLIENTE=rp.cl_cliente and rpd.PRODUCTO=rp.cl_producto and 
+                                                                         rpd.ORDEN=rp.orden and rpd.fecha=rp.fecha
+                             where r.ORIGEN=rp.origen and r.ANO=rp.ano and r.MES=rp.mes and
+                                   r.cl_CLIENTE=rp.cl_cliente and r.cl_PRODUCTO=rp.cl_producto and 
+                                   r.ORDEN=rp.orden and r.fecha=rp.fecha)
+    where rp.ano=x_ano and rp.mes=x_mes;
+  commit:
+  if x_fin=1 then
+    leave iterar_mes;
+  end if;
+  set x_fecha_ini=x_fecha_ini+1 month;
+  set x_ano=year(x_fecha_ini);
+  set x_mes=month(x_fecha_ini);
+end loop;
+commit;
+--update gestion.parametros p -- algoritmo de default
+--  set p.p_int=-1
+--  where p.codigo=21 and x_carga<>0;
+-- Actualización de clientes con su fecha de primera operación
+--update base.clientes cl
+--  set cl.fecha_inicio_op=coalesce(min((select min(rp.fecha) 
+--                                         from gestion.IdCivil _prod_dia rp 
+--                                         where rp.cliente=cl.clave),
+--                                       (select min(rp.fecha) 
+--                                         from gestion.IdCivil _prod rp 
+--                                         where rp.cl_cliente=cl.clave)), cl.fecha_inicio_op-1 day)
+--  where cl.fecha_inicio_op between date('01/01/1900')+1 day and date('01/01/1900')+60 days;
+if dayofweek(current date)=7 then
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 FECHA OPER', 97, 0, '', 0.0);
+  commit;
+  update base.clientes cl
+    set cl.fecha_inicio_op=(select min(rp.fecha) 
+                              from gestion.IdCivil _prod_dia rp 
+                              where rp.cliente=cl.clave and rp.monto_tx>1 and
+                                    (rp.producto not in (6, 7) or rp.monto_tx_mon>=5000))
+    where cl.fecha_inicio_op is null;
+  commit;
+  call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 FECHA OPER FIN', 98, 0, '', 0.0);
+  commit;
+end if;
+commit;
+update ER.CALCULAR_IdCivil _PROD e
+  set e.fecha_fin=current timestamp
+  where e.clave=x_cl_carga;
+commit;
+call ADMIN.LOG_GCB(120, 'IdCivil _PROD2 FIN', 99, 0, '', 0.0);
+commit;
+END P1
