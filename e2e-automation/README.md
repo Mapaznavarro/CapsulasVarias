@@ -28,7 +28,7 @@ requiere login, ingresa credenciales desde variables de entorno y recorre la rut
 cd e2e-automation
 
 # 2. (Opcional pero recomendado) Crear entorno virtual
-python -m venv .venv
+..\python -m venv .venv
 
 # Activar en Windows:
 .venv\Scripts\activate
