@@ -159,41 +159,42 @@ def handle_login(page: Page) -> None:
 def click_hamburger_menu(page: Page) -> None:
     """
     Hace clic en el botón de menú tipo 'hamburguesa' (tres rayas).
-
-    Selectores: se cubren los patrones más comunes.
-    Ajustar si la app usa otro selector.
     """
     selectors = [
-        # Por aria-label (mejor práctica de accesibilidad)
+        # ✅ Selectores basados en tu DOM real (recomendado)
+        "css=div.toggle.menu",  # contenedor del menú
+        "css=div.toggle.menu svg",  # el ícono en sí
+
+        # Si tu header tiene una estructura estable, puedes subir un nivel:
+        "css=div.header div.toggle.menu",
+        "css=app-ui-header div.toggle.menu",
+
+        # (Deja tus fallbacks anteriores por si cambia el HTML)
         "[aria-label='menu' i]",
         "[aria-label='menú' i]",
         "[aria-label='toggle menu' i]",
         "[aria-label='open menu' i]",
         "[aria-label='hamburger' i]",
-        # Por clase CSS típica de hamburguesa
         ".hamburger",
         ".menu-toggle",
         ".navbar-toggle",
         ".burger",
         ".nav-toggle",
-        # Por ícono de Material / Font Awesome
         "button:has(svg[data-icon='bars'])",
         "button:has(.fa-bars)",
-        # Por texto o title
         "button[title*='menu' i]",
         "button[title*='menú' i]",
-        # Botón con tres spans (patrón HTML clásico)
         "button:has(span + span + span)",
-        # Fallback: cualquier botón dentro de nav/header que no tenga texto visible
         "header button",
         "nav button",
         ".navbar button",
     ]
+
     wait_and_click(page, selectors, "menú hamburguesa")
-    # Esperar que la opción Golf sea visible, lo que confirma que el menú está abierto
-    page.locator(
-        ":text('Golf'), [aria-label='Golf'], [title='Golf']"
-    ).first.wait_for(state="visible", timeout=config.TIMEOUT_MS)
+
+    page.locator(":text('Golf'), [aria-label='Golf'], [title='Golf']").first.wait_for(
+        state="visible", timeout=config.TIMEOUT_MS
+    )
     screenshot(page, "03_hamburger_opened")
 
 
