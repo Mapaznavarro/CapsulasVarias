@@ -13,6 +13,9 @@ Requiere:
 """
 
 import sys
+from pathlib import Path
+# Asegura que Python pueda importar módulos del mismo directorio que este script (config.py)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import datetime
 from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
