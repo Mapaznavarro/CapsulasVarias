@@ -69,6 +69,8 @@ SCREENSHOTS_DIR=screenshots
 
 ## Ejecución
 
+### Script 1 – Ruta fija: Golf > Maestros > Entidades
+
 ```bash
 python run_golf_entidades.py
 ```
@@ -88,17 +90,53 @@ El script:
 
 ---
 
+### Script 2 – Recorrido completo de todas las opciones del menú
+
+```bash
+python run_all_menus.py
+```
+
+El script:
+
+1. Abre Chromium de forma visible (ventana maximizada).
+2. Navega a `BASE_URL` y hace login si es necesario.
+3. Abre el menú hamburguesa.
+4. **Descubre dinámicamente** todos los ítems de menú visibles.
+5. Hace clic en cada ítem, detecta sub-menús y los recorre de forma recursiva.
+6. Toma una captura de pantalla en cada nodo del árbol de menú.
+7. Al finalizar, imprime el árbol completo de rutas descubiertas y guarda un reporte en texto (`screenshots/menu_report.txt`).
+8. Espera que el usuario presione **ENTER** antes de cerrar el navegador.
+
+#### Parámetros ajustables
+
+| Constante en `run_all_menus.py` | Por defecto | Descripción |
+|---------------------------------|-------------|-------------|
+| `MAX_DEPTH`                     | `5`         | Profundidad máxima de recursión del árbol de menú |
+| `MENU_ITEM_SELECTORS`           | varios      | Selectores CSS para detectar ítems de menú; ajustar si la app usa otra estructura |
+| `HAMBURGER_SELECTORS`           | varios      | Selectores del botón hamburguesa |
+
+#### Salida generada
+
+| Archivo                        | Contenido                                              |
+|--------------------------------|--------------------------------------------------------|
+| `screenshots/menu__<ruta>.png` | Captura por cada opción de menú visitada               |
+| `screenshots/menu_report.txt`  | Lista de todas las rutas de menú descubiertas          |
+| `screenshots/ERROR.png`        | Captura del estado de la página si el script falla     |
+
+---
+
 ## Estructura del proyecto
 
 ```
 e2e-automation/
-├── .env.example            # Plantilla de variables de entorno
-├── .gitignore              # Excluye .env, screenshots/, traces/, etc.
-├── requirements.txt        # Dependencias Python
-├── config.py               # Carga configuración desde .env
-├── run_golf_entidades.py   # Script principal de automatización
-├── README.md               # Este archivo
-└── screenshots/            # Capturas generadas (ignoradas por git)
+├── .env.example              # Plantilla de variables de entorno
+├── .gitignore                # Excluye .env, screenshots/, traces/, etc.
+├── requirements.txt          # Dependencias Python
+├── config.py                 # Carga configuración desde .env
+├── run_golf_entidades.py     # Script: ruta fija Golf > Maestros > Entidades
+├── run_all_menus.py          # Script: recorrido dinámico de todo el menú
+├── README.md                 # Este archivo
+└── screenshots/              # Capturas generadas (ignoradas por git)
 ```
 
 ---
