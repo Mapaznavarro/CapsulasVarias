@@ -197,28 +197,29 @@ def click_hamburger_menu(page: Page) -> None:
     )
     screenshot(page, "03_hamburger_opened")
 
-
-def click_menu_option(page: Page, option_text: str, step_name: str) -> None:
+def click_main_menu_option(page: Page, option_text: str, step_name: str) -> None:
     """
-    Hace clic en una opción de menú usando su texto.
-
-    Estrategia multi-selector: texto exacto, texto parcial, aria-label.
+    Clic en el menú principal "Aplicaciones" (Golf / Participes LATAM / FrontOn Gestión)
+    usando la estructura real: div.ui-menu-item > div.label > div.text
     """
-    selectors = [
-        f"text='{option_text}'",
-        f"text=\"{option_text}\"",
-        f":text-is('{option_text}')",
-        f"a:has-text('{option_text}')",
-        f"li:has-text('{option_text}')",
-        f"button:has-text('{option_text}')",
-        f"span:has-text('{option_text}')",
-        f"[aria-label='{option_text}']",
-        f"[title='{option_text}']",
-    ]
-    wait_and_click(page, selectors, option_text)
-    # Esperar que la red se estabilice tras el clic (submenús / navegación)
+    # 1) Scope: solo items del menú principal
+    items = page.locator("div.ui-menu-item")
+
+    # 2) Elegir por texto EXACTO del nodo .text
+    target = items.filter(has=page.locator("div.text")).filter(
+        has_text=option_text
+    ).first
+
+    # Validación rápida: que exista y sea visible
+    target.wait_for(state="visible", timeout=config.TIMEOUT_MS)
+
+    # Click en el item completo (no en el texto solamente)
+    target.click()
+    print(f"  ✅  Clic en menú principal: {option_text}")
+
     page.wait_for_load_state("networkidle", timeout=config.TIMEOUT_MS)
     screenshot(page, step_name)
+
 
 
 # ---------------------------------------------------------------------------
@@ -269,22 +270,22 @@ def run() -> None:
 
             # ── Paso 4: Elegir Golf ───────────────────────────────────────
             print("▶ Paso 4: Haciendo clic en 'Golf'…")
-            click_menu_option(page, "Golf", "04_golf_selected")
+            click_main_menu_option(page, "Golf", "04_golf_selected")
             print()
 
             # ── Paso 5: Elegir Maestros ───────────────────────────────────
             print("▶ Paso 5: Haciendo clic en 'Maestros'…")
-            click_menu_option(page, "Maestros", "05_maestros_selected")
+            click_main_menu_option(page, "Maestros", "05_maestros_selected")
             print()
 
             # ── Paso 6: Elegir Entidades (primera vez) ────────────────────
             print("▶ Paso 6: Haciendo clic en 'Entidades'…")
-            click_menu_option(page, "Entidades", "06_entidades_1_selected")
+            click_main_menu_option(page, "Entidades", "06_entidades_1_selected")
             print()
 
             # ── Paso 7: Elegir Entidades (segunda vez – pantalla final) ───
             print("▶ Paso 7: Haciendo clic en 'Entidades' (pantalla final)…")
-            click_menu_option(page, "Entidades", "07_entidades_final")
+            click_main_menu_option(page, "Entidades", "07_entidades_final")
             print()
 
             # ── Fin ───────────────────────────────────────────────────────
@@ -307,5 +308,5 @@ def run() -> None:
             browser.close()
 
 
-if __name__ == "__main__":
+if __name__ == "____":
     run()
